@@ -224,6 +224,89 @@ button[aria-label="Toggle theme"] {
   margin: 0;
 }
 
+.month-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.month-selector label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.month-selector input {
+  margin-right: 0;
+}
+
+.tx-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tx-form input {
+  margin-right: 0;
+}
+
+.form-error {
+  color: #ef4444;
+  font-size: 0.85rem;
+}
+
+.transaction-search-page > p {
+  margin-top: 0;
+}
+
+.transaction-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.transaction-filters input,
+.transaction-filters select {
+  box-sizing: border-box;
+  width: 100%;
+  margin-right: 0;
+}
+
+.transaction-filters select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.clear-filters {
+  justify-self: start;
+}
+
+.transaction-search-results {
+  list-style: none;
+  padding: 0;
+}
+
+.transaction-result-description {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.transaction-result-description strong {
+  overflow-wrap: anywhere;
+}
+
 .settings-card {
   display: flex;
   align-items: flex-end;
@@ -516,5 +599,11 @@ button[aria-label="Toggle theme"] {
   .settings-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .transaction-result {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
   }
 }

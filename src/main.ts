@@ -13,15 +13,12 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true
     },
   });
 
-  await mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
-  // DevTools will not open automatically in production
-
-  // Forward renderer console messages to the terminal for easier debugging
-  mainWindow.webContents.on('console-message', (_ev, level, message, line, sourceId) => {
-    console.log(`Renderer console [${level}] ${message} (${sourceId}:${line})`);
+  mainWindow.webContents.on('console-message', (details) => {
+    console.log(`Renderer console [${details.level}] ${details.message} (${details.sourceId}:${details.lineNumber})`);
   });
 
   mainWindow.webContents.on('did-fail-load', (_ev, errorCode, errorDescription, validatedURL) => {
@@ -32,6 +29,9 @@ async function createWindow() {
     console.error('Renderer process gone:', details);
   });
 
+  await mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+  // DevTools will not open automatically in production
+
   // Quick runtime checks: log if preload exposed `window.api` and document body HTML length
   mainWindow.webContents.executeJavaScript(
     'console.log("__ELECTRON_CHECK__ window.api=", typeof window.api, " bodyLen=", document.body ? document.body.innerHTML.length : 0)'
@@ -39,13 +39,26 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  store = new Store();
-  await store.load();
-  createWindow();
+  try {
+    store = new Store();
+    await store.load();
+    await createWindow();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void createWindow().catch((error) => {
+          console.error('Failed to create Home Budgeting window:', error);
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Failed to start Home Budgeting:', error);
+    app.exit(1);
+  }
+});
+
+app.on('child-process-gone', (_event, details) => {
+  console.error('Child process gone:', details);
 });
 
 app.on('window-all-closed', () => {
@@ -101,8 +114,8 @@ ipcMain.handle('setGlobalIncome', async (_ev, amount: number) => {
   return store.setGlobalIncome(amount);
 });
 
-ipcMain.handle('addTransaction', async (_ev, budgetId: string, description: string, amount: number) => {
-  return store.addTransaction(budgetId, description, amount);
+ipcMain.handle('addTransaction', async (_ev, budgetId: string, description: string, amount: number, date?: string) => {
+  return store.addTransaction(budgetId, description, amount, date);
 });
 
 ipcMain.handle('getTransactions', async (_ev, budgetId: string) => {

@@ -14,8 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   updateSavingsGoal: (id: string, name: string, target: number, saved: number) =>
     ipcRenderer.invoke('updateSavingsGoal', id, name, target, saved),
   deleteSavingsGoal: (id: string) => ipcRenderer.invoke('deleteSavingsGoal', id),
-  addTransaction: (budgetId: string, description: string, amount: number) =>
-    ipcRenderer.invoke('addTransaction', budgetId, description, amount),
+  addTransaction: (budgetId: string, description: string, amount: number, date?: string) =>
+    ipcRenderer.invoke('addTransaction', budgetId, description, amount, date),
   getTransactions: (budgetId: string) => ipcRenderer.invoke('getTransactions', budgetId),
   updateTransaction: (budgetId: string, transactionId: string, description: string, amount: number) =>
     ipcRenderer.invoke('updateTransaction', budgetId, transactionId, description, amount),

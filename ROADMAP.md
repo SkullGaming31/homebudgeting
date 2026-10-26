@@ -2,16 +2,17 @@
 
 ## Priorities
 
-1. **Monthly budget periods**
-   - Track category spending by month so transactions from previous months do not affect current balances.
+1. **Monthly budget periods** (implemented)
+   - Navigate by month; category totals, transaction lists, and global balances use only the selected month's transactions.
+   - Category limits and monthly global income repeat each month; new transactions can be dated within the selected month.
 2. **Recurring transactions**
    - Schedule regular bills and income, with reminders for upcoming transactions.
 3. **Budget alerts**
    - Notify when a category is nearing its limit or has exceeded it.
 4. **Spending summaries**
    - Show monthly totals by category and visual spending trends.
-5. **Transaction search and filters**
-   - Find transactions by description, amount, category, or date.
+5. **Transaction search and filters** (implemented)
+   - Search descriptions and filter across all categories and months by category, amount range, and date range.
 6. **Savings goals** (implemented)
    - Create goals with target amounts and track progress with manual contributions or withdrawals.
    - Reserve a configurable percentage of the positive remaining global balance without automatically crediting a goal.

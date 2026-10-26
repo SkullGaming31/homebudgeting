@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import Modal from './components/Modal';
 import Toasts, { ToastItem } from './components/Toast';
 import { formatCurrency } from './utils';
-import { getBudgetRemaining } from '../budget';
+import { getBudgetRemaining, getMonthInputValue, getTransactionsForMonth } from '../budget';
 import { calculateSavingsReserve } from '../savings';
+import { filterTransactions } from '../transactions';
 
 type Budget = { id: string; name: string; limit: number; income?: number; transactions?: Transaction[] };
 type Transaction = { id: string; description: string; amount: number; date: string };
@@ -51,6 +52,23 @@ function makeBrowserId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function getLocalDateInputValue(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${getMonthInputValue(date)}-${day}`;
+}
+
+function getDefaultTransactionDate(month: string) {
+  const today = new Date();
+  return getMonthInputValue(today) === month ? getLocalDateInputValue(today) : `${month}-01`;
+}
+
+function getLastDateOfMonth(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const lastDay = new Date(year, monthNumber, 0).getDate();
+  return `${month}-${String(lastDay).padStart(2, '0')}`;
+}
+
 function applyTheme(theme: 'dark' | 'light') {
   document.documentElement.classList.toggle('dark', theme === 'dark');
   try {
@@ -96,6 +114,12 @@ export default function App() {
   const [limit, setLimit] = useState<number | ''>('');
   const [current, setCurrent] = useState<{ id: string; name: string } | null>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
+  const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionCategoryFilter, setTransactionCategoryFilter] = useState('');
+  const [transactionMinAmount, setTransactionMinAmount] = useState<number | ''>('');
+  const [transactionMaxAmount, setTransactionMaxAmount] = useState<number | ''>('');
+  const [transactionFromDate, setTransactionFromDate] = useState('');
+  const [transactionToDate, setTransactionToDate] = useState('');
   const [deleting, setDeleting] = useState<null | { id: string; name: string }>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
@@ -107,6 +131,7 @@ export default function App() {
   const [editBudgetIncome, setEditBudgetIncome] = useState<number | ''>('');
   const [globalIncome, setGlobalIncome] = useState<number | ''>(0);
   const [savingsPercentage, setSavingsPercentage] = useState<number | ''>(0);
+  const [selectedMonth, setSelectedMonth] = useState(() => getMonthInputValue());
   const [savingsGoalName, setSavingsGoalName] = useState('');
   const [savingsGoalTarget, setSavingsGoalTarget] = useState<number | ''>('');
   const [editingSavingsGoal, setEditingSavingsGoal] = useState<SavingsGoal | null>(null);
@@ -116,7 +141,7 @@ export default function App() {
   const [adjustingSavingsGoal, setAdjustingSavingsGoal] = useState<null | { goal: SavingsGoal; direction: 'add' | 'withdraw' }>(null);
   const [savingsAdjustment, setSavingsAdjustment] = useState<number | ''>('');
   const [deletingSavingsGoal, setDeletingSavingsGoal] = useState<SavingsGoal | null>(null);
-  const [page, setPage] = useState<'home' | 'savings' | 'settings'>('home');
+  const [page, setPage] = useState<'home' | 'transactions' | 'savings' | 'settings'>('home');
 
   function showToast(message: string, type: ToastItem['type'] = 'info') {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -260,9 +285,14 @@ export default function App() {
   }
 
   async function saveGlobalIncome() {
+    const amount = globalIncome === '' ? 0 : Number(globalIncome);
+    if (!Number.isFinite(amount) || amount < 0) {
+      showToast('Enter a non-negative global income amount', 'error');
+      return;
+    }
+
     try {
       const api = (window as any).api;
-      const amount = Number(globalIncome) || 0;
       const savedIncome = api?.setGlobalIncome
         ? await api.setGlobalIncome(amount)
         : (localStorage.setItem(GLOBAL_INCOME_KEY, String(amount)), amount);
@@ -277,19 +307,20 @@ export default function App() {
   }
 
   async function createBudget() {
-    if (!name) {
+    const budgetName = name.trim();
+    if (!budgetName) {
       showToast('Enter a budget name', 'error');
       return;
     }
     try {
       const api = (window as any).api;
       if (api?.createBudget) {
-        await api.createBudget(name, Number(limit) || 0);
+        await api.createBudget(budgetName, Number(limit) || 0);
       } else {
         const budgets = readBrowserBudgets();
         budgets.push({
           id: makeBrowserId(),
-          name,
+          name: budgetName,
           limit: Number(limit) || 0,
           income: 0,
           transactions: [],
@@ -325,7 +356,7 @@ export default function App() {
     }
   }
 
-  async function addTransaction(description: string, amount: number): Promise<boolean> {
+  async function addTransaction(description: string, amount: number, date: string): Promise<boolean> {
     if (!current) {
       showToast('No budget selected', 'error');
       return false;
@@ -333,10 +364,10 @@ export default function App() {
     try {
       const api = (window as any).api;
       if (api?.addTransaction) {
-        await api.addTransaction(current.id, description, amount);
+        await api.addTransaction(current.id, description, amount, date);
         setTxs(await api.getTransactions(current.id));
       } else {
-        const transaction: Transaction = { id: makeBrowserId(), description, amount, date: new Date().toISOString() };
+        const transaction: Transaction = { id: makeBrowserId(), description, amount, date };
         updateBrowserBudget(current.id, (budget) => {
           budget.transactions = [...(budget.transactions || []), transaction];
         });
@@ -364,11 +395,10 @@ export default function App() {
           if (!transaction) throw new Error('Transaction not found');
           transaction.description = description;
           transaction.amount = amount;
-          transaction.date = new Date().toISOString();
         });
         setTxs((transactions) => transactions.map((transaction) => (
           transaction.id === transactionId
-            ? { ...transaction, description, amount, date: new Date().toISOString() }
+            ? { ...transaction, description, amount }
             : transaction
         )));
       }
@@ -399,10 +429,35 @@ export default function App() {
     }
   }
 
+  async function deleteSearchedTransaction(transaction: Transaction & { budgetId: string }) {
+    try {
+      const api = (window as any).api;
+      if (api?.deleteTransaction) {
+        await api.deleteTransaction(transaction.budgetId, transaction.id);
+      } else {
+        updateBrowserBudget(transaction.budgetId, (budget) => {
+          budget.transactions = (budget.transactions || []).filter((item) => item.id !== transaction.id);
+        });
+      }
+      if (current?.id === transaction.budgetId) {
+        setTxs((items) => items.filter((item) => item.id !== transaction.id));
+      }
+      await refresh();
+      showToast('Transaction deleted', 'info');
+    } catch {
+      showToast('Failed to delete transaction', 'error');
+    }
+  }
+
   function openEditor(tx: Transaction) {
     setEditingTx(tx);
     setEditDesc(tx.description);
     setEditAmount(tx.amount);
+  }
+
+  function editSearchedTransaction(transaction: Transaction & { budgetId: string; budgetName: string }) {
+    setCurrent({ id: transaction.budgetId, name: transaction.budgetName });
+    openEditor(transaction);
   }
 
   function closeEditor() {
@@ -417,13 +472,41 @@ export default function App() {
     closeEditor();
   }
 
+  function moveSelectedMonth(offset: number) {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    setSelectedMonth(getMonthInputValue(new Date(year, month - 1 + offset, 1)));
+  }
+
+  const [selectedYear, selectedMonthNumber] = selectedMonth.split('-').map(Number);
+  const selectedMonthLabel = new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(selectedYear, selectedMonthNumber - 1, 1));
   const totalTransactions = budgets.reduce(
-    (total, budget) => total + (budget.transactions || []).reduce((sum, transaction) => sum + (transaction.amount || 0), 0),
+    (total, budget) => total + getTransactionsForMonth(
+      budget.transactions || [],
+      selectedMonth
+    ).reduce((sum, transaction) => sum + (transaction.amount || 0), 0),
     0
   );
   const globalBalanceBeforeSavings = (Number(globalIncome) || 0) - totalTransactions;
   const savingsReserve = calculateSavingsReserve(globalBalanceBeforeSavings, Number(savingsPercentage) || 0);
   const remainingGlobal = globalBalanceBeforeSavings - savingsReserve;
+  const filteredTransactions = filterTransactions(
+    budgets.flatMap((budget) => (budget.transactions || []).map((transaction) => ({
+      ...transaction,
+      budgetId: budget.id,
+      budgetName: budget.name,
+    }))),
+    {
+      query: transactionSearch,
+      budgetId: transactionCategoryFilter,
+      minAmount: transactionMinAmount === '' ? undefined : transactionMinAmount,
+      maxAmount: transactionMaxAmount === '' ? undefined : transactionMaxAmount,
+      fromDate: transactionFromDate,
+      toDate: transactionToDate,
+    }
+  );
 
   return (
     <div className="container">
@@ -437,6 +520,13 @@ export default function App() {
             onClick={() => setPage('home')}
           >
             Home
+          </button>
+          <button
+            className={page === 'transactions' ? 'active' : 'btn muted'}
+            aria-current={page === 'transactions' ? 'page' : undefined}
+            onClick={() => setPage('transactions')}
+          >
+            Transactions
           </button>
           <button
             className={page === 'savings' ? 'active' : 'btn muted'}
@@ -478,6 +568,34 @@ export default function App() {
       <main id="main-content">
         {page === 'home' ? (
           <>
+        <section className="month-selector" aria-label="Budget month">
+          <button
+            className="btn muted"
+            aria-label="Previous month"
+            title="Previous month"
+            onClick={() => moveSelectedMonth(-1)}
+          >
+            &lt;
+          </button>
+          <label htmlFor="budget-month">Budget month</label>
+          <input
+            id="budget-month"
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => {
+              if (/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value)) setSelectedMonth(e.target.value);
+            }}
+          />
+          <span className="muted small">{selectedMonthLabel}</span>
+          <button
+            className="btn muted"
+            aria-label="Next month"
+            title="Next month"
+            onClick={() => moveSelectedMonth(1)}
+          >
+            &gt;
+          </button>
+        </section>
         <section className="global-income-summary">
           <div className="summary-row">
             <span className="muted small">Monthly Remaining Global Income</span>
@@ -504,7 +622,8 @@ export default function App() {
         <section className="cards">
           {budgets.length === 0 && <div className="empty">No budgets yet — create one.</div>}
           {budgets.map((b) => {
-            const remaining = getBudgetRemaining(b.limit, b.transactions);
+            const monthTransactions = getTransactionsForMonth(b.transactions || [], selectedMonth);
+            const remaining = getBudgetRemaining(b.limit, monthTransactions);
             return (
               <div className="card" key={b.id}>
                 <div className="card-left">
@@ -517,7 +636,7 @@ export default function App() {
                     <div className="card-title">{b.name}</div>
                   </div>
                   <div className="muted">Limit: {formatCurrency(b.limit)}</div>
-                  <div className="muted small">{b.transactions?.length || 0} transactions</div>
+                  <div className="muted small">{monthTransactions.length} transactions in {selectedMonthLabel}</div>
                   <div style={{ marginTop: 6 }}>
                     <span className={`amount ${remaining < 0 ? 'neg' : 'pos'}`}>{formatCurrency(remaining)}</span>
                     <span className="muted small" style={{ marginLeft: 8 }}>remaining</span>
@@ -548,9 +667,14 @@ export default function App() {
           <section className="transactions">
             <h2>Transactions — {current.name}</h2>
             <div className="tx-panel">
-              <TxForm categoryName={current.name} onAdd={addTransaction} />
+              <TxForm
+                key={selectedMonth}
+                categoryName={current.name}
+                month={selectedMonth}
+                onAdd={addTransaction}
+              />
               <ul>
-                {txs.map((t) => (
+                {getTransactionsForMonth(txs, selectedMonth).map((t) => (
                   <li key={t.id} className="tx">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <svg className="icon tx-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -578,6 +702,124 @@ export default function App() {
           </section>
         )}
           </>
+        ) : page === 'transactions' ? (
+          <section className="transaction-search-page" aria-labelledby="transaction-search-heading">
+            <h2 id="transaction-search-heading">Transactions</h2>
+            <p className="muted">Search and filter transactions across all categories and months.</p>
+            <div className="transaction-filters">
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-search">Description</label>
+                <input
+                  id="transaction-search"
+                  type="search"
+                  value={transactionSearch}
+                  onChange={(e) => setTransactionSearch(e.target.value)}
+                  placeholder="Search descriptions"
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-category">Category</label>
+                <select
+                  id="transaction-category"
+                  value={transactionCategoryFilter}
+                  onChange={(e) => setTransactionCategoryFilter(e.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {budgets.map((budget) => (
+                    <option key={budget.id} value={budget.id}>{budget.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-min-amount">Minimum amount</label>
+                <input
+                  id="transaction-min-amount"
+                  type="number"
+                  step="0.01"
+                  value={transactionMinAmount}
+                  onChange={(e) => setTransactionMinAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-max-amount">Maximum amount</label>
+                <input
+                  id="transaction-max-amount"
+                  type="number"
+                  step="0.01"
+                  value={transactionMaxAmount}
+                  onChange={(e) => setTransactionMaxAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-from-date">From date</label>
+                <input
+                  id="transaction-from-date"
+                  type="date"
+                  value={transactionFromDate}
+                  onChange={(e) => setTransactionFromDate(e.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="transaction-to-date">To date</label>
+                <input
+                  id="transaction-to-date"
+                  type="date"
+                  value={transactionToDate}
+                  onChange={(e) => setTransactionToDate(e.target.value)}
+                />
+              </div>
+              <button
+                className="btn muted clear-filters"
+                onClick={() => {
+                  setTransactionSearch('');
+                  setTransactionCategoryFilter('');
+                  setTransactionMinAmount('');
+                  setTransactionMaxAmount('');
+                  setTransactionFromDate('');
+                  setTransactionToDate('');
+                }}
+              >
+                Clear filters
+              </button>
+            </div>
+            <p className="muted small" aria-live="polite">
+              {filteredTransactions.length} matching {filteredTransactions.length === 1 ? 'transaction' : 'transactions'}
+            </p>
+            <ul className="transaction-search-results">
+              {filteredTransactions.length === 0 && (
+                <li className="empty">No transactions match these filters.</li>
+              )}
+              {filteredTransactions.map((transaction) => (
+                <li className="tx transaction-result" key={`${transaction.budgetId}-${transaction.id}`}>
+                  <div className="transaction-result-description">
+                    <strong>{transaction.description}</strong>
+                    <span className="muted small">{transaction.budgetName}</span>
+                    <span className="muted small">{new Date(transaction.date).toLocaleString()}</span>
+                  </div>
+                  <div className="tx-actions">
+                    <div className={`amount ${transaction.amount < 0 ? 'neg' : 'pos'}`}>
+                      {formatCurrency(transaction.amount)}
+                    </div>
+                    <div className="actions">
+                      <button
+                        aria-label={`Edit ${transaction.description}`}
+                        onClick={() => editSearchedTransaction(transaction)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn muted"
+                        aria-label={`Delete ${transaction.description}`}
+                        onClick={() => deleteSearchedTransaction(transaction)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : page === 'savings' ? (
           <section className="savings-page" aria-labelledby="savings-heading">
             <h2 id="savings-heading">Savings Goals</h2>
@@ -738,15 +980,20 @@ export default function App() {
             title={`Edit Budget`}
             onClose={() => setEditingBudget(null)}
             onConfirm={async () => {
+              const budgetName = editBudgetName.trim();
+              if (!budgetName) {
+                showToast('Enter a budget name', 'error');
+                return;
+              }
               try {
                 const api = (window as any).api;
                 const updatedLimit = Number(editBudgetLimit) || 0;
                 const updatedIncome = Number(editBudgetIncome) || 0;
                 if (api?.updateBudget) {
-                  await api.updateBudget(editingBudget.id, editBudgetName, updatedLimit, updatedIncome);
+                  await api.updateBudget(editingBudget.id, budgetName, updatedLimit, updatedIncome);
                 } else {
                   updateBrowserBudget(editingBudget.id, (budget) => {
-                    budget.name = editBudgetName;
+                    budget.name = budgetName;
                     budget.limit = updatedLimit;
                     budget.income = updatedIncome;
                   });
@@ -872,13 +1119,17 @@ export default function App() {
 
 function TxForm({
   categoryName,
+  month,
   onAdd,
 }: {
   categoryName: string;
-  onAdd: (desc: string, amount: number) => Promise<boolean>;
+  month: string;
+  onAdd: (desc: string, amount: number, date: string) => Promise<boolean>;
 }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState<number | ''>('');
+  const [transactionDate, setTransactionDate] = useState(() => getDefaultTransactionDate(month));
+  const [dateError, setDateError] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -886,10 +1137,12 @@ function TxForm({
     if (submitting) return;
     setSubmitting(true);
     try {
-      if (await onAdd(desc, Number(amount) || 0)) {
+      const date = new Date(`${transactionDate}T12:00:00`).toISOString();
+      if (await onAdd(desc, Number(amount) || 0, date)) {
         setConfirming(false);
         setDesc('');
         setAmount('');
+        setTransactionDate(getDefaultTransactionDate(month));
       }
     } finally {
       setSubmitting(false);
@@ -901,9 +1154,29 @@ function TxForm({
       <div className="tx-form">
         <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description" />
         <input value={amount as any} onChange={(e) => setAmount(e.target.value === '' ? '' : Number(e.target.value))} type="number" placeholder="Amount" />
+        <input
+          aria-label="Transaction date"
+          aria-invalid={Boolean(dateError)}
+          value={transactionDate}
+          onChange={(e) => {
+            setTransactionDate(e.target.value);
+            setDateError('');
+          }}
+          type="date"
+          min={`${month}-01`}
+          max={getLastDateOfMonth(month)}
+        />
+        {dateError && <span className="form-error" role="alert">{dateError}</span>}
         <button
           onClick={() => {
-            if (desc.trim()) setConfirming(true);
+            if (!desc.trim()) return;
+            const parsedDate = new Date(`${transactionDate}T12:00:00`);
+            if (!transactionDate || !Number.isFinite(parsedDate.getTime()) ||
+              getMonthInputValue(parsedDate) !== month) {
+              setDateError('Choose a valid date within the selected month');
+              return;
+            }
+            setConfirming(true);
           }}
         >
           Add
@@ -918,6 +1191,7 @@ function TxForm({
         >
           <p>Add this transaction to {categoryName}?</p>
           <p><strong>{desc}</strong>: {formatCurrency(Number(amount) || 0)}</p>
+          <p>Date: {new Date(`${transactionDate}T12:00:00`).toLocaleDateString()}</p>
         </Modal>
       )}
     </>

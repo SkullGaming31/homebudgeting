@@ -94,6 +94,9 @@ export class Store {
   }
 
   async setGlobalIncome(amount: number) {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new Error('Global income must be a finite non-negative amount');
+    }
     await this.load();
     this.data.globalIncome = amount;
     await this.save();
@@ -106,8 +109,11 @@ export class Store {
   }
 
   async createBudget(name: string, limit: number, income: number = 0) {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw new Error('Budget name is required');
+    }
     await this.load();
-    const b: Budget = { id: makeId(), name, limit, income: income || 0, transactions: [] };
+    const b: Budget = { id: makeId(), name: name.trim(), limit, income: income || 0, transactions: [] };
     this.data.budgets.push(b);
     await this.save();
     return b;
@@ -120,21 +126,26 @@ export class Store {
   }
 
   async updateBudget(budgetId: string, name: string, limit: number, income: number) {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw new Error('Budget name is required');
+    }
     await this.load();
     const budget = this.data.budgets.find((b) => b.id === budgetId);
     if (!budget) throw new Error('Budget not found');
-    budget.name = name;
+    budget.name = name.trim();
     budget.limit = limit;
     budget.income = income;
     await this.save();
     return budget;
   }
 
-  async addTransaction(budgetId: string, description: string, amount: number) {
+  async addTransaction(budgetId: string, description: string, amount: number, date?: string) {
     await this.load();
     const budget = this.data.budgets.find((b) => b.id === budgetId);
     if (!budget) throw new Error('Budget not found');
-    const t: Transaction = { id: makeId(), description, amount, date: new Date().toISOString() };
+    const transactionDate = date ? new Date(date) : new Date();
+    if (!Number.isFinite(transactionDate.getTime())) throw new Error('Transaction date is invalid');
+    const t: Transaction = { id: makeId(), description, amount, date: transactionDate.toISOString() };
     budget.transactions.push(t);
     await this.save();
     return t;
@@ -148,7 +159,6 @@ export class Store {
     if (!tx) throw new Error('Transaction not found');
     tx.description = description;
     tx.amount = amount;
-    tx.date = new Date().toISOString();
     await this.save();
     return tx;
   }
