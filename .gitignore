@@ -1,5 +1,7 @@
 /node_modules
 /dist
+/release
+/builder-debug.yml
 NOTES.txt
 .env
 QA-REPORT.md

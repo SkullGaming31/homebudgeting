@@ -18,6 +18,14 @@ npm run build
 npm run start
 ```
 
+Build a Windows x64 installer:
+
+```powershell
+npm run dist:win
+```
+
+The NSIS setup executable is written to `release/` as `Home-Budgeting-Setup-<version>.exe`. It supports choosing an installation folder and creates Start Menu and desktop shortcuts. The installer is unsigned, so Windows SmartScreen may show a warning until the app is signed.
+
 Development (renderer + main process in separate terminals):
 
 ```powershell

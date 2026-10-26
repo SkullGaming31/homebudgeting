@@ -1,6 +1,6 @@
 {
   "name": "home-budgeting",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Home Budgeting Electron app (TypeScript)",
   "main": "dist/main.js",
   "scripts": {
@@ -8,6 +8,7 @@
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "start": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
     "dev:renderer": "vite",
     "dev:main": "tsc -w",
     "test": "npm run build:main && node --test tests/*.test.cjs"
@@ -24,7 +25,36 @@
     "@types/react-dom": "^18.0.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "typescript": "^6.0.3",
     "vite": "^7.3.7"
+  },
+  "build": {
+    "appId": "com.skullgaming31.homebudgeting",
+    "productName": "Home Budgeting",
+    "artifactName": "Home-Budgeting-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Home Budgeting"
+    }
   }
 }
