@@ -46,8 +46,8 @@ contextBridge.exposeInMainWorld('api', {
   addTransaction: (budgetId: string, description: string, amount: number, date?: string) =>
     ipcRenderer.invoke('addTransaction', budgetId, description, amount, date),
   getTransactions: (budgetId: string) => ipcRenderer.invoke('getTransactions', budgetId),
-  updateTransaction: (budgetId: string, transactionId: string, description: string, amount: number) =>
-    ipcRenderer.invoke('updateTransaction', budgetId, transactionId, description, amount),
+  updateTransaction: (budgetId: string, transactionId: string, description: string, amount: number, date?: string) =>
+    ipcRenderer.invoke('updateTransaction', budgetId, transactionId, description, amount, date),
   deleteTransaction: (budgetId: string, transactionId: string) => ipcRenderer.invoke('deleteTransaction', budgetId, transactionId),
 });
 

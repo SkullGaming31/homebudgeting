@@ -19,3 +19,5 @@
 7. **CSV import/export and backups** (implemented)
    - Export transactions to CSV and append CSV rows, creating missing categories with a zero budget limit.
    - Create and restore validated full-data JSON backups.
+8. **Transaction editing** (implemented)
+   - Edit transaction descriptions, amounts, and date/time from a category, respecting the selected time zone.

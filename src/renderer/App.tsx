@@ -6,7 +6,13 @@ import { BudgetAlertStatus, getBudgetAlertStatus, getBudgetRemaining, getMonthIn
 import { calculateSavingsReserve } from '../savings';
 import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
-import { getZonedDateKey, getZonedMonthKey, zonedNoonToIso } from '../timezone';
+import {
+  getZonedDateKey,
+  getZonedDateTimeInputValue,
+  getZonedMonthKey,
+  zonedDateTimeToIso,
+  zonedNoonToIso,
+} from '../timezone';
 import { getDaysUntilDate, getNextOccurrenceDate, isValidDateKey, RecurrenceFrequency, RecurringTransactionSchedule } from '../recurring';
 import {
   appendCsvTransactions,
@@ -228,6 +234,7 @@ export default function App() {
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [editDesc, setEditDesc] = useState('');
   const [editAmount, setEditAmount] = useState<number | ''>('');
+  const [editDateTime, setEditDateTime] = useState('');
   const [editingBudget, setEditingBudget] = useState<null | { id: string; name: string; limit: number; income?: number }>(null);
   const [editBudgetName, setEditBudgetName] = useState('');
   const [editBudgetLimit, setEditBudgetLimit] = useState<number | ''>('');
@@ -857,12 +864,12 @@ export default function App() {
     }
   }
 
-  async function updateTransaction(transactionId: string, description: string, amount: number) {
+  async function updateTransaction(transactionId: string, description: string, amount: number, date: string) {
     if (!current) return showToast('No budget selected', 'error');
     try {
       const api = (window as any).api;
       if (api?.updateTransaction) {
-        await api.updateTransaction(current.id, transactionId, description, amount);
+        await api.updateTransaction(current.id, transactionId, description, amount, date);
         setTxs(await api.getTransactions(current.id));
       } else {
         updateBrowserBudget(current.id, (budget) => {
@@ -870,10 +877,11 @@ export default function App() {
           if (!transaction) throw new Error('Transaction not found');
           transaction.description = description;
           transaction.amount = amount;
+          transaction.date = date;
         });
         setTxs((transactions) => transactions.map((transaction) => (
           transaction.id === transactionId
-            ? { ...transaction, description, amount }
+            ? { ...transaction, description, amount, date }
             : transaction
         )));
       }
@@ -928,6 +936,7 @@ export default function App() {
     setEditingTx(tx);
     setEditDesc(tx.description);
     setEditAmount(tx.amount);
+    setEditDateTime(getZonedDateTimeInputValue(tx.date, timeZone));
   }
 
   function editSearchedTransaction(transaction: Transaction & { budgetId: string; budgetName: string }) {
@@ -939,11 +948,20 @@ export default function App() {
     setEditingTx(null);
     setEditDesc('');
     setEditAmount('');
+    setEditDateTime('');
   }
 
   async function confirmEdit() {
     if (!editingTx) return;
-    await updateTransaction(editingTx.id, editDesc, Number(editAmount) || 0);
+    const originalDateTime = getZonedDateTimeInputValue(editingTx.date, timeZone);
+    const date = editDateTime === originalDateTime
+      ? editingTx.date
+      : zonedDateTimeToIso(editDateTime, timeZone);
+    if (!date) {
+      showToast('Choose a valid transaction date and time', 'error');
+      return;
+    }
+    await updateTransaction(editingTx.id, editDesc, Number(editAmount) || 0, date);
     closeEditor();
   }
 
@@ -1692,6 +1710,12 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
               <input value={editAmount as any} onChange={(e) => setEditAmount(e.target.value === '' ? '' : Number(e.target.value))} type="number" />
+              <input
+                aria-label="Transaction date and time"
+                type="datetime-local"
+                value={editDateTime}
+                onChange={(e) => setEditDateTime(e.target.value)}
+              />
             </div>
           </Modal>
         )}

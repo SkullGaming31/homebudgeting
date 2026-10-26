@@ -68,6 +68,50 @@ export function getZonedMonthKey(value: string | Date, timeZone?: TimeZone) {
   return getZonedDateKey(value, timeZone)?.slice(0, 7) ?? null;
 }
 
+export function getZonedDateTimeInputValue(value: string | Date, timeZone?: TimeZone) {
+  const parts = getZonedParts(typeof value === 'string' ? new Date(value) : value, timeZone);
+  if (!parts) return '';
+  const date = `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+  const time = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+  return `${date}T${time}`;
+}
+
+export function zonedDateTimeToIso(value: string, timeZone?: TimeZone) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59) return null;
+
+  const calendarDate = new Date(0);
+  calendarDate.setUTCFullYear(year, month - 1, day);
+  calendarDate.setUTCHours(hour, minute, 0, 0);
+  if (
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) return null;
+
+  const wallClock = calendarDate.getTime();
+  let instant = wallClock;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = getZonedParts(new Date(instant), timeZone);
+    if (!parts) return null;
+    const shown = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    instant += wallClock - shown;
+  }
+
+  const result = new Date(instant);
+  const parts = getZonedParts(result, timeZone);
+  return parts &&
+    parts.year === year &&
+    parts.month === month &&
+    parts.day === day &&
+    parts.hour === hour &&
+    parts.minute === minute
+    ? result.toISOString()
+    : null;
+}
+
 // Returns the instant of noon on the given calendar date in the time zone, so the
 // stored timestamp stays on that date regardless of the viewer's system time zone.
 export function zonedNoonToIso(dateKey: string, timeZone?: TimeZone) {

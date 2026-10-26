@@ -339,14 +339,17 @@ export class Store {
     return t;
   }
 
-  async updateTransaction(budgetId: string, transactionId: string, description: string, amount: number) {
+  async updateTransaction(budgetId: string, transactionId: string, description: string, amount: number, date?: string) {
     await this.load();
     const budget = this.data.budgets.find((b) => b.id === budgetId);
     if (!budget) throw new Error('Budget not found');
     const tx = budget.transactions.find((t) => t.id === transactionId);
     if (!tx) throw new Error('Transaction not found');
+    const transactionDate = date === undefined ? undefined : new Date(date);
+    if (transactionDate && !Number.isFinite(transactionDate.getTime())) throw new Error('Transaction date is invalid');
     tx.description = description;
     tx.amount = amount;
+    if (transactionDate) tx.date = transactionDate.toISOString();
     await this.save();
     return tx;
   }

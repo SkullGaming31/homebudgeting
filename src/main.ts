@@ -175,8 +175,8 @@ ipcMain.handle('getTransactions', async (_ev, budgetId: string) => {
   return store.getTransactions(budgetId);
 });
 
-ipcMain.handle('updateTransaction', async (_ev, budgetId: string, transactionId: string, description: string, amount: number) => {
-  return store.updateTransaction(budgetId, transactionId, description, amount);
+ipcMain.handle('updateTransaction', async (_ev, budgetId: string, transactionId: string, description: string, amount: number, date?: string) => {
+  return store.updateTransaction(budgetId, transactionId, description, amount, date);
 });
 
 ipcMain.handle('deleteTransaction', async (_ev, budgetId: string, transactionId: string) => {

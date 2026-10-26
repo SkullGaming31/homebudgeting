@@ -20,7 +20,9 @@ const {
 } = require('../dist/recurring');
 const {
   getZonedDateKey,
+  getZonedDateTimeInputValue,
   isValidTimeZone,
+  zonedDateTimeToIso,
   zonedNoonToIso,
 } = require('../dist/timezone');
 const { filterTransactions } = require('../dist/transactions');
@@ -333,6 +335,16 @@ describe('time zone support', () => {
     for (const zone of ['UTC', 'America/Los_Angeles', 'Pacific/Auckland', 'Pacific/Kiritimati']) {
       assert.equal(getZonedDateKey(zonedNoonToIso('2025-03-01', zone), zone), '2025-03-01');
     }
+  });
+
+  it('converts editable date and time values in the selected time zone', () => {
+    const instant = '2025-01-15T20:45:00.000Z';
+
+    assert.equal(getZonedDateTimeInputValue(instant, 'America/Los_Angeles'), '2025-01-15T12:45');
+    assert.equal(zonedDateTimeToIso('2025-01-15T12:45', 'America/Los_Angeles'), instant);
+    assert.equal(zonedDateTimeToIso('2025-03-09T02:30', 'America/Los_Angeles'), null);
+    assert.equal(zonedDateTimeToIso('2025-02-30T12:00', 'UTC'), null);
+    assert.equal(zonedDateTimeToIso('2025-01-15T24:00', 'UTC'), null);
   });
 
   it('converts calendar dates on both daylight-saving transition days', () => {
@@ -1256,6 +1268,33 @@ describe('Store', () => {
 
     const reloaded = new Store();
     assert.deepEqual(await reloaded.getTransactions(budget.id), [updated]);
+  });
+
+  it('updates a transaction date when one is provided and rejects invalid dates', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Travel', 500);
+    const transaction = await store.addTransaction(
+      budget.id,
+      'Train ticket',
+      60,
+      '2025-01-15T12:00:00.000Z'
+    );
+    const changedDate = '2025-02-20T18:35:00.000Z';
+
+    const updated = await store.updateTransaction(
+      budget.id,
+      transaction.id,
+      'Train ticket',
+      60,
+      changedDate
+    );
+    assert.equal(updated.date, changedDate);
+
+    await assert.rejects(
+      store.updateTransaction(budget.id, transaction.id, 'Train ticket', 60, 'not-a-date'),
+      { message: 'Transaction date is invalid' }
+    );
+    assert.deepEqual(await store.getTransactions(budget.id), [updated]);
   });
 
   it('rejects updates and transaction creation for missing budgets or transactions', async () => {
