@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Modal from './components/Modal';
 import Toasts, { ToastItem } from './components/Toast';
 import { formatCurrency } from './utils';
-import { getBudgetRemaining, getMonthInputValue, getTransactionsForMonth } from '../budget';
+import { BudgetAlertStatus, getBudgetAlertStatus, getBudgetRemaining, getMonthInputValue, getTransactionsForMonth } from '../budget';
 import { calculateSavingsReserve } from '../savings';
 import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
@@ -18,6 +18,7 @@ const BUDGETS_KEY = 'home-budgeting-budgets';
 const SAVINGS_PERCENTAGE_KEY = 'home-budgeting-savings-percentage';
 const SAVINGS_GOALS_KEY = 'home-budgeting-savings-goals';
 const TIME_ZONE_KEY = 'home-budgeting-time-zone';
+const BUDGET_ALERT_THRESHOLD_KEY = 'home-budgeting-alert-threshold';
 
 function getTimeZoneOptions(): string[] {
   const supported = (Intl as any).supportedValuesOf;
@@ -141,6 +142,11 @@ export default function App() {
   const [editBudgetIncome, setEditBudgetIncome] = useState<number | ''>('');
   const [globalIncome, setGlobalIncome] = useState<number | ''>(0);
   const [savingsPercentage, setSavingsPercentage] = useState<number | ''>(0);
+  const [budgetAlertThreshold, setBudgetAlertThreshold] = useState(80);
+  const [budgetAlertThresholdDraft, setBudgetAlertThresholdDraft] = useState<number | ''>(80);
+  const [savedDataLoaded, setSavedDataLoaded] = useState(false);
+  const alertStatusesRef = useRef<Map<string, BudgetAlertStatus> | null>(null);
+  const alertContextRef = useRef<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthInputValue());
   const [timeZone, setTimeZone] = useState('');
   const [timeZoneDraft, setTimeZoneDraft] = useState('');
@@ -165,6 +171,41 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!savedDataLoaded) return;
+
+    const context = `${selectedMonth}|${timeZone}|${budgetAlertThreshold}`;
+    const statuses = new Map<string, { status: BudgetAlertStatus; name: string }>();
+    for (const budget of budgets) {
+      const transactions = getTransactionsForMonth(budget.transactions || [], selectedMonth, timeZone);
+      const status = getBudgetAlertStatus(budget.limit, transactions, budgetAlertThreshold);
+      if (status) {
+        statuses.set(budget.id, {
+          status,
+          name: budget.name,
+        });
+      }
+    }
+
+    if (alertContextRef.current === context && alertStatusesRef.current) {
+      for (const [id, current] of statuses) {
+        const previous = alertStatusesRef.current.get(id)?.status;
+        if (previous === current.status || previous === 'over') continue;
+        showToast(
+          current.status === 'over'
+            ? `${current.name} is over its budget for ${selectedMonthLabel}`
+            : `${current.name} is nearing its budget limit for ${selectedMonthLabel}`,
+          current.status === 'over' ? 'error' : 'info'
+        );
+      }
+    }
+
+    alertStatusesRef.current = new Map(
+      [...statuses].map(([id, { status }]) => [id, status])
+    );
+    alertContextRef.current = context;
+  }, [savedDataLoaded, budgets, selectedMonth, timeZone, budgetAlertThreshold]);
+
+  useEffect(() => {
     console.log('App mounted');
     initTheme();
     refresh();
@@ -183,12 +224,21 @@ export default function App() {
         : Number(localStorage.getItem(SAVINGS_PERCENTAGE_KEY)) || 0;
       setSavingsPercentage(storedSavingsPercentage);
       setSavingsGoals(api?.getSavingsGoals ? await api.getSavingsGoals() : readBrowserSavingsGoals());
+      const storedAlertThreshold: number = api?.getBudgetAlertThreshold
+        ? await api.getBudgetAlertThreshold()
+        : Number(localStorage.getItem(BUDGET_ALERT_THRESHOLD_KEY) ?? '80');
+      if (!Number.isFinite(storedAlertThreshold) || storedAlertThreshold < 1 || storedAlertThreshold > 100) {
+        throw new Error('Saved budget alert threshold must be between 1 and 100');
+      }
+      setBudgetAlertThreshold(storedAlertThreshold);
+      setBudgetAlertThresholdDraft(storedAlertThreshold);
       const storedTimeZone: string = api?.getTimeZone
         ? await api.getTimeZone()
         : localStorage.getItem(TIME_ZONE_KEY) || '';
       setTimeZone(storedTimeZone);
       setTimeZoneDraft(storedTimeZone);
       setSelectedMonth(getZonedMonthKey(new Date(), storedTimeZone) || getMonthInputValue());
+      setSavedDataLoaded(true);
     } catch {
       showToast('Failed to load saved data', 'error');
     }
@@ -206,6 +256,25 @@ export default function App() {
       showToast('Time zone saved', 'success');
     } catch {
       showToast('Failed to save time zone', 'error');
+    }
+  }
+
+  async function saveBudgetAlertThreshold() {
+    const threshold = Number(budgetAlertThresholdDraft);
+    if (!Number.isFinite(threshold) || threshold < 1 || threshold > 100) {
+      showToast('Budget alert threshold must be between 1 and 100', 'error');
+      return;
+    }
+    try {
+      const api = (window as any).api;
+      const savedThreshold = api?.setBudgetAlertThreshold
+        ? await api.setBudgetAlertThreshold(threshold)
+        : (localStorage.setItem(BUDGET_ALERT_THRESHOLD_KEY, String(threshold)), threshold);
+      setBudgetAlertThreshold(savedThreshold);
+      setBudgetAlertThresholdDraft(savedThreshold);
+      showToast('Budget alert threshold saved', 'success');
+    } catch {
+      showToast('Failed to save budget alert threshold', 'error');
     }
   }
 
@@ -712,6 +781,8 @@ export default function App() {
           {budgets.map((b) => {
             const monthTransactions = getTransactionsForMonth(b.transactions || [], selectedMonth, timeZone);
             const remaining = getBudgetRemaining(b.limit, monthTransactions);
+            const alertStatus = getBudgetAlertStatus(b.limit, monthTransactions, budgetAlertThreshold);
+            const spent = b.limit - remaining;
             return (
               <div className="card" key={b.id}>
                 <div className="card-left">
@@ -729,6 +800,13 @@ export default function App() {
                     <span className={`amount ${remaining < 0 ? 'neg' : 'pos'}`}>{formatCurrency(remaining)}</span>
                     <span className="muted small" style={{ marginLeft: 8 }}>remaining</span>
                   </div>
+                  {alertStatus && (
+                    <div className={`budget-alert ${alertStatus}`} role="status" aria-live="polite">
+                      {alertStatus === 'over'
+                        ? `Over budget by ${formatCurrency(-remaining)}`
+                        : `Approaching limit (${Math.round((spent / b.limit) * 100)}% used)`}
+                    </div>
+                  )}
                   <div className="actions" style={{ marginTop: 8 }}>
                     <button title={`View ${b.name} transactions`} onClick={() => openBudget(b)} aria-label={`View ${b.name}`}>
                       View
@@ -1029,6 +1107,24 @@ export default function App() {
             </div>
             <p className="muted small">
               The time zone decides which month and day each transaction belongs to, and how transaction times are shown.
+            </p>
+            <div className="settings-card">
+              <div className="form-field">
+                <label className="form-label" htmlFor="budget-alert-threshold">Budget warning threshold (%)</label>
+                <input
+                  id="budget-alert-threshold"
+                  value={budgetAlertThresholdDraft}
+                  onChange={(e) => setBudgetAlertThresholdDraft(e.target.value === '' ? '' : Number(e.target.value))}
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.1"
+                />
+              </div>
+              <button onClick={saveBudgetAlertThreshold}>Save Alert Threshold</button>
+            </div>
+            <p className="muted small">
+              Show a warning when a category reaches this percentage of its monthly limit. Any spending above the limit is marked over budget.
             </p>
             <div className="settings-card">
               <div className="form-field">

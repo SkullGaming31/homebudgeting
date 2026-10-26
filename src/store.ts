@@ -38,6 +38,25 @@ export class Store {
     return this.data.globalIncome || 0;
   }
 
+  async getBudgetAlertThreshold() {
+    await this.load();
+    const threshold = this.data.budgetAlertThreshold ?? 80;
+    if (!Number.isFinite(threshold) || threshold < 1 || threshold > 100) {
+      throw new Error('Saved budget alert threshold must be between 1 and 100');
+    }
+    return threshold;
+  }
+
+  async setBudgetAlertThreshold(threshold: number) {
+    if (!Number.isFinite(threshold) || threshold < 1 || threshold > 100) {
+      throw new Error('Budget alert threshold must be between 1 and 100');
+    }
+    await this.load();
+    this.data.budgetAlertThreshold = threshold;
+    await this.save();
+    return threshold;
+  }
+
   async getSavingsPercentage() {
     await this.load();
     return this.data.savingsPercentage || 0;

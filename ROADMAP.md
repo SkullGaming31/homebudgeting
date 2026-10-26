@@ -7,8 +7,8 @@
    - Category limits and monthly global income repeat each month; new transactions can be dated within the selected month.
 2. **Recurring transactions**
    - Schedule regular bills and income, with reminders for upcoming transactions.
-3. **Budget alerts**
-   - Notify when a category is nearing its limit or has exceeded it.
+3. **Budget alerts** (implemented)
+   - Show inline warnings and toasts when spending reaches the configurable monthly threshold or exceeds the category limit.
 4. **Spending summaries** (implemented)
    - Show monthly totals by category and a visual trend for the selected month and previous five months.
 5. **Transaction search and filters** (implemented)

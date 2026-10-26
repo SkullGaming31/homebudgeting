@@ -74,6 +74,14 @@ ipcMain.handle('getGlobalIncome', async () => {
   return store.getGlobalIncome();
 });
 
+ipcMain.handle('getBudgetAlertThreshold', async () => {
+  return store.getBudgetAlertThreshold();
+});
+
+ipcMain.handle('setBudgetAlertThreshold', async (_ev, threshold: number) => {
+  return store.setBudgetAlertThreshold(threshold);
+});
+
 ipcMain.handle('getSavingsPercentage', async () => {
   return store.getSavingsPercentage();
 });

@@ -1,5 +1,18 @@
 import { getZonedMonthKey, TimeZone } from './timezone';
 
+export type BudgetAlertStatus = 'approaching' | 'over';
+
+export function getBudgetAlertStatus(
+  limit: number,
+  transactions: readonly { amount: number }[],
+  thresholdPercentage: number
+): BudgetAlertStatus | null {
+  const spent = transactions.reduce((total, transaction) => total + transaction.amount, 0);
+  if (spent > limit) return 'over';
+  if (limit > 0 && spent >= limit * thresholdPercentage / 100) return 'approaching';
+  return null;
+}
+
 export function getBudgetRemaining(
   limit: number,
   transactions: readonly { amount: number }[] = []

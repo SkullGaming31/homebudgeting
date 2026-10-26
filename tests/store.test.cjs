@@ -5,6 +5,7 @@ const path = require('node:path');
 const Module = require('node:module');
 const { afterEach, beforeEach, describe, it } = require('node:test');
 const {
+  getBudgetAlertStatus,
   getBudgetRemaining,
   getMonthInputValue,
   getMonthKey,
@@ -196,6 +197,28 @@ describe('getBudgetRemaining', () => {
 
   it('accounts for transaction credits when calculating the remaining balance', () => {
     assert.equal(getBudgetRemaining(200, [{ amount: 250 }, { amount: -25 }]), -25);
+  });
+});
+
+describe('getBudgetAlertStatus', () => {
+  it('uses the 80 percent threshold boundary and treats spending above the limit as over', () => {
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 79 }], 80), null);
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 80 }], 80), 'approaching');
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 100 }], 80), 'approaching');
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 101 }], 80), 'over');
+  });
+
+  it('honors a configurable percentage and nets credits against spending', () => {
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 49 }], 50), null);
+    assert.equal(getBudgetAlertStatus(100, [{ amount: 50 }], 50), 'approaching');
+    assert.equal(
+      getBudgetAlertStatus(100, [{ amount: 85 }, { amount: -10 }], 80),
+      null
+    );
+    assert.equal(
+      getBudgetAlertStatus(100, [{ amount: 110 }, { amount: -15 }], 80),
+      'approaching'
+    );
   });
 });
 
@@ -485,6 +508,54 @@ describe('Store', () => {
       budgets: [],
       globalIncome: 0,
     });
+  });
+
+  it('defaults the budget alert threshold to 80 and persists configured values', async () => {
+    const store = new Store();
+
+    assert.equal(await store.getBudgetAlertThreshold(), 80);
+    assert.equal(await store.setBudgetAlertThreshold(65), 65);
+    assert.equal(
+      JSON.parse(await fs.readFile(store.filePath, 'utf8')).budgetAlertThreshold,
+      65
+    );
+    assert.equal(await new Store().getBudgetAlertThreshold(), 65);
+  });
+
+  it('uses the default threshold when loading existing data without an alert setting', async () => {
+    const store = new Store();
+    const legacyData = {
+      budgets: [{ id: 'budget-1', name: 'Groceries', limit: 300, transactions: [] }],
+      globalIncome: 1200,
+    };
+    await fs.writeFile(store.filePath, JSON.stringify(legacyData), 'utf8');
+
+    assert.equal(await store.getBudgetAlertThreshold(), 80);
+    assert.deepEqual(store.data, legacyData);
+    assert.deepEqual(JSON.parse(await fs.readFile(store.filePath, 'utf8')), legacyData);
+  });
+
+  it('accepts threshold endpoints and rejects invalid configured or saved values', async () => {
+    const store = new Store();
+
+    assert.equal(await store.setBudgetAlertThreshold(1), 1);
+    assert.equal(await store.setBudgetAlertThreshold(100), 100);
+
+    for (const threshold of [0, 100.01, NaN, Infinity, -Infinity]) {
+      await assert.rejects(store.setBudgetAlertThreshold(threshold), {
+        message: 'Budget alert threshold must be between 1 and 100',
+      });
+      assert.equal(await store.getBudgetAlertThreshold(), 100);
+    }
+
+    const persisted = JSON.parse(await fs.readFile(store.filePath, 'utf8'));
+    for (const threshold of [0, 100.01, 'not-a-number']) {
+      persisted.budgetAlertThreshold = threshold;
+      await fs.writeFile(store.filePath, JSON.stringify(persisted), 'utf8');
+      await assert.rejects(new Store().getBudgetAlertThreshold(), {
+        message: 'Saved budget alert threshold must be between 1 and 100',
+      });
+    }
   });
 
   it('recovers from invalid JSON by replacing it with the empty default data', async () => {

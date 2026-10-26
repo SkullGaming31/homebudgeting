@@ -26,4 +26,5 @@ export interface AppData {
   savingsPercentage?: number;
   savingsGoals?: SavingsGoal[];
   timeZone?: string;
+  budgetAlertThreshold?: number;
 }

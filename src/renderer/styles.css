@@ -578,6 +578,32 @@ button[aria-label="Toggle theme"] {
   gap: 6px
 }
 
+.budget-alert {
+  padding: 6px 8px;
+  margin-top: 4px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.budget-alert.approaching {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.dark .budget-alert.approaching {
+  color: #fbbf24;
+}
+
+.budget-alert.over {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.dark .budget-alert.over {
+  color: #f87171;
+}
 .card-title {
   font-size: 1.05rem
 }
