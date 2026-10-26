@@ -48,3 +48,7 @@ Notes
 - Recurring schedules support weekly and monthly reminders five days ahead; recording an occurrence is manual and advances its next due date.
 - Settings can export transactions as CSV or append CSV files with Category, Description, Amount, and Date columns. Missing categories are created with a zero budget limit.
 - Create a full JSON backup of budgets, transactions, schedules, savings goals, and app settings; restoring a validated backup replaces the current data after confirmation.
+
+## Contributing and license
+
+Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, tests, and pull request guidance. This project is licensed under the [MIT License](./LICENSE).
