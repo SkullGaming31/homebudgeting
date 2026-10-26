@@ -172,6 +172,7 @@ button[aria-label="Toggle theme"] {
 
 .page-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
 }
@@ -325,6 +326,48 @@ button[aria-label="Toggle theme"] {
   background: var(--accent);
 }
 
+.recurring-page > p {
+  margin-top: 0;
+}
+
+.recurring-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  align-items: end;
+}
+
+.recurring-form input,
+.recurring-form select {
+  box-sizing: border-box;
+  width: 100%;
+  margin-right: 0;
+}
+
+.recurring-form select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.recurring-form-actions,
+.recurring-actions {
+  flex-wrap: wrap;
+}
+
+.recurring-due {
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.recurring-due.soon {
+  color: #b45309;
+}
+
+.dark .recurring-due.soon {
+  color: #fbbf24;
+}
 .month-selector {
   display: flex;
   flex-wrap: wrap;

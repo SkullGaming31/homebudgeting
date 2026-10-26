@@ -13,6 +13,26 @@ contextBridge.exposeInMainWorld('api', {
   setSavingsPercentage: (percentage: number) => ipcRenderer.invoke('setSavingsPercentage', percentage),
   getTimeZone: () => ipcRenderer.invoke('getTimeZone'),
   setTimeZone: (timeZone: string) => ipcRenderer.invoke('setTimeZone', timeZone),
+  getRecurringTransactions: () => ipcRenderer.invoke('getRecurringTransactions'),
+  createRecurringTransaction: (
+    budgetId: string,
+    description: string,
+    amount: number,
+    nextDueDate: string,
+    frequency: 'weekly' | 'monthly'
+  ) => ipcRenderer.invoke('createRecurringTransaction', budgetId, description, amount, nextDueDate, frequency),
+  updateRecurringTransaction: (
+    id: string,
+    budgetId: string,
+    description: string,
+    amount: number,
+    nextDueDate: string,
+    frequency: 'weekly' | 'monthly'
+  ) => ipcRenderer.invoke('updateRecurringTransaction', id, budgetId, description, amount, nextDueDate, frequency),
+  completeRecurringTransaction: (id: string, amount: number, date: string) =>
+    ipcRenderer.invoke('completeRecurringTransaction', id, amount, date),
+  skipRecurringOccurrence: (id: string) => ipcRenderer.invoke('skipRecurringOccurrence', id),
+  deleteRecurringTransaction: (id: string) => ipcRenderer.invoke('deleteRecurringTransaction', id),
   getSavingsGoals: () => ipcRenderer.invoke('getSavingsGoals'),
   createSavingsGoal: (name: string, target: number) => ipcRenderer.invoke('createSavingsGoal', name, target),
   updateSavingsGoal: (id: string, name: string, target: number, saved: number) =>

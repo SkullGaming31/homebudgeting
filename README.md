@@ -37,3 +37,4 @@ Notes
 - The Home view includes spending totals by category for the selected month and a six-month spending trend ending in that month. Positive transaction amounts count as spending; negative amounts are treated as credits.
 - Settings includes a time zone selector (default: system time zone). It determines which day and month each transaction belongs to, and how transaction times are displayed.
 - Budget alerts show inline and as toasts when category spending reaches the configurable monthly warning threshold (default 80%) or exceeds its limit.
+- Recurring schedules support weekly and monthly reminders five days ahead; recording an occurrence is manual and advances its next due date.

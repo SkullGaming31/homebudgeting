@@ -1,7 +1,8 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { app } from 'electron';
-import { AppData, Budget, SavingsGoal, Transaction } from './types';
+import { AppData, Budget, RecurringTransaction, SavingsGoal, Transaction } from './types';
+import { getNextOccurrenceDate, isValidDateKey } from './recurring';
 import { isValidTimeZone } from './timezone';
 
 function makeId() {
@@ -87,6 +88,126 @@ export class Store {
     return this.data.timeZone;
   }
 
+  async getRecurringTransactions() {
+    await this.load();
+    return this.data.recurringTransactions || [];
+  }
+
+  async createRecurringTransaction(
+    budgetId: string,
+    description: string,
+    amount: number,
+    nextDueDate: string,
+    frequency: 'weekly' | 'monthly'
+  ) {
+    if (typeof description !== 'string' || !description.trim()) {
+      throw new Error('Recurring transaction description is required');
+    }
+    if (!Number.isFinite(amount)) throw new Error('Recurring transaction amount must be finite');
+    if (!isValidDateKey(nextDueDate)) throw new Error('Recurring transaction due date is invalid');
+    if (frequency !== 'weekly' && frequency !== 'monthly') {
+      throw new Error('Recurrence frequency must be weekly or monthly');
+    }
+
+    await this.load();
+    if (!this.data.budgets.some((budget) => budget.id === budgetId)) {
+      throw new Error('Budget not found');
+    }
+    const schedule: RecurringTransaction = {
+      id: makeId(),
+      budgetId,
+      description: description.trim(),
+      amount,
+      frequency,
+      nextDueDate,
+      ...(frequency === 'monthly' ? { dayOfMonth: Number(nextDueDate.slice(-2)) } : {}),
+    };
+    this.data.recurringTransactions = [...(this.data.recurringTransactions || []), schedule];
+    await this.save();
+    return schedule;
+  }
+
+  async updateRecurringTransaction(
+    id: string,
+    budgetId: string,
+    description: string,
+    amount: number,
+    nextDueDate: string,
+    frequency: 'weekly' | 'monthly'
+  ) {
+    if (typeof description !== 'string' || !description.trim()) {
+      throw new Error('Recurring transaction description is required');
+    }
+    if (!Number.isFinite(amount)) throw new Error('Recurring transaction amount must be finite');
+    if (!isValidDateKey(nextDueDate)) throw new Error('Recurring transaction due date is invalid');
+    if (frequency !== 'weekly' && frequency !== 'monthly') {
+      throw new Error('Recurrence frequency must be weekly or monthly');
+    }
+
+    await this.load();
+    if (!this.data.budgets.some((budget) => budget.id === budgetId)) {
+      throw new Error('Budget not found');
+    }
+    const schedule = (this.data.recurringTransactions || []).find((item) => item.id === id);
+    if (!schedule) throw new Error('Recurring transaction not found');
+    schedule.budgetId = budgetId;
+    schedule.description = description.trim();
+    schedule.amount = amount;
+    schedule.frequency = frequency;
+    schedule.nextDueDate = nextDueDate;
+    if (frequency === 'monthly') schedule.dayOfMonth = Number(nextDueDate.slice(-2));
+    else delete schedule.dayOfMonth;
+    await this.save();
+    return schedule;
+  }
+
+  async completeRecurringTransaction(id: string, amount: number, date: string) {
+    if (!Number.isFinite(amount)) throw new Error('Transaction amount must be finite');
+    const transactionDate = new Date(date);
+    if (!Number.isFinite(transactionDate.getTime())) throw new Error('Transaction date is invalid');
+
+    await this.load();
+    const schedule = (this.data.recurringTransactions || []).find((item) => item.id === id);
+    if (!schedule) throw new Error('Recurring transaction not found');
+    const budget = this.data.budgets.find((item) => item.id === schedule.budgetId);
+    if (!budget) throw new Error('Budget not found');
+
+    const transaction: Transaction = {
+      id: makeId(),
+      description: schedule.description,
+      amount,
+      date: transactionDate.toISOString(),
+    };
+    budget.transactions.push(transaction);
+    schedule.nextDueDate = getNextOccurrenceDate(
+      schedule.nextDueDate,
+      schedule.frequency,
+      schedule.dayOfMonth
+    );
+    await this.save();
+    return { transaction, schedule };
+  }
+
+  async skipRecurringOccurrence(id: string) {
+    await this.load();
+    const schedule = (this.data.recurringTransactions || []).find((item) => item.id === id);
+    if (!schedule) throw new Error('Recurring transaction not found');
+    schedule.nextDueDate = getNextOccurrenceDate(
+      schedule.nextDueDate,
+      schedule.frequency,
+      schedule.dayOfMonth
+    );
+    await this.save();
+    return schedule;
+  }
+
+  async deleteRecurringTransaction(id: string) {
+    await this.load();
+    this.data.recurringTransactions = (this.data.recurringTransactions || [])
+      .filter((schedule) => schedule.id !== id);
+    await this.save();
+  }
+
   async getSavingsGoals() {
     await this.load();
     return this.data.savingsGoals || [];
@@ -157,6 +278,8 @@ export class Store {
   async deleteBudget(id: string) {
     await this.load();
     this.data.budgets = this.data.budgets.filter((b) => b.id !== id);
+    this.data.recurringTransactions = (this.data.recurringTransactions || [])
+      .filter((schedule) => schedule.budgetId !== id);
     await this.save();
   }
 

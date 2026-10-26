@@ -20,6 +20,16 @@ export interface SavingsGoal {
   saved: number;
 }
 
+export interface RecurringTransaction {
+  id: string;
+  budgetId: string;
+  description: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly';
+  nextDueDate: string;
+  dayOfMonth?: number;
+}
+
 export interface AppData {
   budgets: Budget[];
   globalIncome?: number;
@@ -27,4 +37,5 @@ export interface AppData {
   savingsGoals?: SavingsGoal[];
   timeZone?: string;
   budgetAlertThreshold?: number;
+  recurringTransactions?: RecurringTransaction[];
 }

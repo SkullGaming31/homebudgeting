@@ -14,6 +14,11 @@ const {
 const { calculateSavingsReserve } = require('../dist/savings');
 const { getSpendingSummary } = require('../dist/spending');
 const {
+  getDaysUntilDate,
+  getNextOccurrenceDate,
+  isValidDateKey,
+} = require('../dist/recurring');
+const {
   getZonedDateKey,
   isValidTimeZone,
   zonedNoonToIso,
@@ -477,6 +482,45 @@ describe('getSpendingSummary', () => {
   });
 });
 
+describe('recurring date helpers', () => {
+  it('advances weekly occurrences by seven calendar days across month, year, and leap-day boundaries', () => {
+    assert.equal(getNextOccurrenceDate('2025-01-29', 'weekly'), '2025-02-05');
+    assert.equal(getNextOccurrenceDate('2024-12-28', 'weekly'), '2025-01-04');
+    assert.equal(getNextOccurrenceDate('2024-02-24', 'weekly'), '2024-03-02');
+  });
+
+  it('clamps monthly occurrences to month end without losing their anchor day', () => {
+    assert.equal(getNextOccurrenceDate('2025-01-31', 'monthly'), '2025-02-28');
+    assert.equal(getNextOccurrenceDate('2025-02-28', 'monthly', 31), '2025-03-31');
+    assert.equal(getNextOccurrenceDate('2024-01-31', 'monthly'), '2024-02-29');
+    assert.equal(getNextOccurrenceDate('2024-02-29', 'monthly', 31), '2024-03-31');
+    assert.equal(getNextOccurrenceDate('2025-01-30', 'monthly', 30), '2025-02-28');
+  });
+
+  it('calculates positive, same-day, and overdue reminder intervals as calendar days', () => {
+    assert.equal(getDaysUntilDate('2025-06-15', '2025-06-10'), 5);
+    assert.equal(getDaysUntilDate('2025-06-10', '2025-06-10'), 0);
+    assert.equal(getDaysUntilDate('2025-06-07', '2025-06-10'), -3);
+    assert.equal(getDaysUntilDate('2025-03-01', '2025-02-28'), 1);
+  });
+
+  it('accepts only real YYYY-MM-DD date keys and rejects invalid recurrence inputs', () => {
+    for (const date of ['2024-02-29', '2025-12-31']) {
+      assert.equal(isValidDateKey(date), true);
+    }
+    for (const date of ['', '2025-2-01', '2025-02-29', '2025-04-31', '2025-13-01', '2025-01-01T00:00:00Z']) {
+      assert.equal(isValidDateKey(date), false, `expected ${date} to be invalid`);
+      assert.throws(() => getDaysUntilDate(date, '2025-01-01'), RangeError);
+      assert.throws(() => getNextOccurrenceDate(date, 'weekly'), RangeError);
+    }
+
+    assert.throws(() => getDaysUntilDate('2025-01-01', 'not-a-date'), RangeError);
+    assert.throws(() => getNextOccurrenceDate('2025-01-01', 'yearly'), RangeError);
+    assert.throws(() => getNextOccurrenceDate('2025-01-01', 'monthly', 0), RangeError);
+    assert.throws(() => getNextOccurrenceDate('2025-01-01', 'monthly', 32), RangeError);
+  });
+});
+
 let userDataPath;
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -508,6 +552,243 @@ describe('Store', () => {
       budgets: [],
       globalIncome: 0,
     });
+  });
+
+  it('creates and updates recurring schedules with trimmed fields and persisted monthly anchor days', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Household', 1000);
+
+    const monthly = await store.createRecurringTransaction(
+      budget.id,
+      '  Rent  ',
+      900,
+      '2025-01-31',
+      'monthly'
+    );
+    assert.deepEqual(
+      {
+        budgetId: monthly.budgetId,
+        description: monthly.description,
+        amount: monthly.amount,
+        frequency: monthly.frequency,
+        nextDueDate: monthly.nextDueDate,
+        dayOfMonth: monthly.dayOfMonth,
+      },
+      {
+        budgetId: budget.id,
+        description: 'Rent',
+        amount: 900,
+        frequency: 'monthly',
+        nextDueDate: '2025-01-31',
+        dayOfMonth: 31,
+      }
+    );
+    assert.ok(monthly.id);
+
+    const weekly = await store.createRecurringTransaction(
+      budget.id,
+      'Internet',
+      60,
+      '2025-02-01',
+      'weekly'
+    );
+    assert.equal(Object.hasOwn(weekly, 'dayOfMonth'), false);
+
+    const updated = await store.updateRecurringTransaction(
+      monthly.id,
+      budget.id,
+      '  Mortgage  ',
+      1100,
+      '2025-02-28',
+      'monthly'
+    );
+    assert.deepEqual(
+      {
+        id: updated.id,
+        description: updated.description,
+        amount: updated.amount,
+        nextDueDate: updated.nextDueDate,
+        dayOfMonth: updated.dayOfMonth,
+      },
+      {
+        id: monthly.id,
+        description: 'Mortgage',
+        amount: 1100,
+        nextDueDate: '2025-02-28',
+        dayOfMonth: 28,
+      }
+    );
+
+    const convertedToWeekly = await store.updateRecurringTransaction(
+      monthly.id,
+      budget.id,
+      'Mortgage',
+      1100,
+      '2025-03-01',
+      'weekly'
+    );
+    assert.equal(convertedToWeekly.frequency, 'weekly');
+    assert.equal(Object.hasOwn(convertedToWeekly, 'dayOfMonth'), false);
+
+    const reloaded = new Store();
+    assert.deepEqual(
+      (await reloaded.getRecurringTransactions()).map((schedule) => schedule.id),
+      [monthly.id, weekly.id]
+    );
+    assert.equal(
+      (await reloaded.getRecurringTransactions())[0].nextDueDate,
+      '2025-03-01'
+    );
+  });
+
+  it('rejects invalid recurring schedule fields and leaves persisted schedules unchanged', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Household', 1000);
+    const schedule = await store.createRecurringTransaction(
+      budget.id,
+      'Rent',
+      900,
+      '2025-01-31',
+      'monthly'
+    );
+
+    const invalidCreates = [
+      ['', 900, '2025-02-01', 'weekly'],
+      ['Rent', NaN, '2025-02-01', 'weekly'],
+      ['Rent', Infinity, '2025-02-01', 'weekly'],
+      ['Rent', 900, '2025-02-30', 'weekly'],
+      ['Rent', 900, '2025-02-01', 'yearly'],
+    ];
+    for (const [description, amount, dueDate, frequency] of invalidCreates) {
+      await assert.rejects(
+        store.createRecurringTransaction(budget.id, description, amount, dueDate, frequency)
+      );
+    }
+    await assert.rejects(
+      store.createRecurringTransaction('missing-budget', 'Rent', 900, '2025-02-01', 'weekly'),
+      { message: 'Budget not found' }
+    );
+
+    await assert.rejects(
+      store.updateRecurringTransaction(schedule.id, budget.id, '  ', 950, '2025-02-01', 'weekly')
+    );
+    await assert.rejects(
+      store.updateRecurringTransaction(schedule.id, budget.id, 'Rent', NaN, '2025-02-01', 'weekly')
+    );
+    await assert.rejects(
+      store.updateRecurringTransaction(schedule.id, budget.id, 'Rent', 950, '2025-02-30', 'weekly')
+    );
+    await assert.rejects(
+      store.updateRecurringTransaction(schedule.id, 'missing-budget', 'Rent', 950, '2025-02-01', 'weekly'),
+      { message: 'Budget not found' }
+    );
+    await assert.rejects(
+      store.updateRecurringTransaction('missing-schedule', budget.id, 'Rent', 950, '2025-02-01', 'weekly'),
+      { message: 'Recurring transaction not found' }
+    );
+
+    assert.deepEqual(await new Store().getRecurringTransactions(), [schedule]);
+  });
+
+  it('completes a recurring occurrence by persisting its transaction and advanced date together', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Household', 1000);
+    const schedule = await store.createRecurringTransaction(
+      budget.id,
+      'Rent',
+      900,
+      '2025-01-31',
+      'monthly'
+    );
+
+    const completed = await store.completeRecurringTransaction(
+      schedule.id,
+      925,
+      '2025-01-31T12:30:00.000Z'
+    );
+    assert.deepEqual(
+      {
+        description: completed.transaction.description,
+        amount: completed.transaction.amount,
+        date: completed.transaction.date,
+        nextDueDate: completed.schedule.nextDueDate,
+      },
+      {
+        description: 'Rent',
+        amount: 925,
+        date: '2025-01-31T12:30:00.000Z',
+        nextDueDate: '2025-02-28',
+      }
+    );
+    assert.ok(completed.transaction.id);
+
+    const persisted = JSON.parse(await fs.readFile(store.filePath, 'utf8'));
+    assert.deepEqual(persisted.budgets[0].transactions, [completed.transaction]);
+    assert.deepEqual(persisted.recurringTransactions, [completed.schedule]);
+
+    const reloaded = new Store();
+    assert.deepEqual(await reloaded.getTransactions(budget.id), [completed.transaction]);
+    assert.deepEqual(await reloaded.getRecurringTransactions(), [completed.schedule]);
+  });
+
+  it('rejects invalid completion details without persisting a transaction or advancing the schedule', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Household', 1000);
+    const schedule = await store.createRecurringTransaction(
+      budget.id,
+      'Rent',
+      900,
+      '2025-01-31',
+      'monthly'
+    );
+
+    for (const amount of [NaN, Infinity, -Infinity]) {
+      await assert.rejects(
+        store.completeRecurringTransaction(schedule.id, amount, '2025-01-31T12:00:00.000Z'),
+        { message: 'Transaction amount must be finite' }
+      );
+    }
+    await assert.rejects(
+      store.completeRecurringTransaction(schedule.id, 900, 'not-a-date'),
+      { message: 'Transaction date is invalid' }
+    );
+    await assert.rejects(
+      store.completeRecurringTransaction('missing-schedule', 900, '2025-01-31T12:00:00.000Z'),
+      { message: 'Recurring transaction not found' }
+    );
+    assert.deepEqual(await store.getTransactions(budget.id), []);
+    assert.deepEqual(await store.getRecurringTransactions(), [schedule]);
+  });
+
+  it('skips and deletes recurring schedules persistently without recording a transaction', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Household', 1000);
+    const skippedSchedule = await store.createRecurringTransaction(
+      budget.id,
+      'Utilities',
+      150,
+      '2025-12-25',
+      'weekly'
+    );
+    const deletedSchedule = await store.createRecurringTransaction(
+      budget.id,
+      'Unused',
+      1,
+      '2025-12-31',
+      'monthly'
+    );
+
+    const skipped = await store.skipRecurringOccurrence(skippedSchedule.id);
+    assert.equal(skipped.nextDueDate, '2026-01-01');
+    await assert.rejects(store.skipRecurringOccurrence('missing-schedule'), {
+      message: 'Recurring transaction not found',
+    });
+    await store.deleteRecurringTransaction(deletedSchedule.id);
+    await store.deleteRecurringTransaction('missing-schedule');
+
+    const reloaded = new Store();
+    assert.deepEqual(await reloaded.getRecurringTransactions(), [skipped]);
+    assert.deepEqual(await reloaded.getTransactions(budget.id), []);
   });
 
   it('defaults the budget alert threshold to 80 and persists configured values', async () => {

@@ -7,10 +7,12 @@ import { calculateSavingsReserve } from '../savings';
 import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
 import { getZonedDateKey, getZonedMonthKey, zonedNoonToIso } from '../timezone';
+import { getDaysUntilDate, getNextOccurrenceDate, isValidDateKey, RecurrenceFrequency, RecurringTransactionSchedule } from '../recurring';
 
 type Budget = { id: string; name: string; limit: number; income?: number; transactions?: Transaction[] };
 type Transaction = { id: string; description: string; amount: number; date: string };
 type SavingsGoal = { id: string; name: string; target: number; saved: number };
+type RecurringSchedule = RecurringTransactionSchedule;
 
 const THEME_KEY = 'theme-preference';
 const GLOBAL_INCOME_KEY = 'home-budgeting-global-income';
@@ -19,6 +21,7 @@ const SAVINGS_PERCENTAGE_KEY = 'home-budgeting-savings-percentage';
 const SAVINGS_GOALS_KEY = 'home-budgeting-savings-goals';
 const TIME_ZONE_KEY = 'home-budgeting-time-zone';
 const BUDGET_ALERT_THRESHOLD_KEY = 'home-budgeting-alert-threshold';
+const RECURRING_SCHEDULES_KEY = 'home-budgeting-recurring-schedules';
 
 function getTimeZoneOptions(): string[] {
   const supported = (Intl as any).supportedValuesOf;
@@ -55,6 +58,18 @@ function readBrowserSavingsGoals(): SavingsGoal[] {
 
 function writeBrowserSavingsGoals(goals: SavingsGoal[]) {
   localStorage.setItem(SAVINGS_GOALS_KEY, JSON.stringify(goals));
+}
+
+function readBrowserRecurringSchedules(): RecurringSchedule[] {
+  const stored = localStorage.getItem(RECURRING_SCHEDULES_KEY);
+  if (!stored) return [];
+  const parsed: unknown = JSON.parse(stored);
+  if (!Array.isArray(parsed)) throw new Error('Saved recurring schedules are invalid');
+  return parsed as RecurringSchedule[];
+}
+
+function writeBrowserRecurringSchedules(schedules: RecurringSchedule[]) {
+  localStorage.setItem(RECURRING_SCHEDULES_KEY, JSON.stringify(schedules));
 }
 
 function updateBrowserBudget(id: string, update: (budget: Budget) => void) {
@@ -121,6 +136,7 @@ export default function App() {
   }
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
+  const [recurringSchedules, setRecurringSchedules] = useState<RecurringSchedule[]>([]);
   const [name, setName] = useState('');
   const [limit, setLimit] = useState<number | ''>('');
   const [current, setCurrent] = useState<{ id: string; name: string } | null>(null);
@@ -159,7 +175,18 @@ export default function App() {
   const [adjustingSavingsGoal, setAdjustingSavingsGoal] = useState<null | { goal: SavingsGoal; direction: 'add' | 'withdraw' }>(null);
   const [savingsAdjustment, setSavingsAdjustment] = useState<number | ''>('');
   const [deletingSavingsGoal, setDeletingSavingsGoal] = useState<SavingsGoal | null>(null);
-  const [page, setPage] = useState<'home' | 'transactions' | 'savings' | 'settings'>('home');
+  const [page, setPage] = useState<'home' | 'transactions' | 'recurring' | 'savings' | 'settings'>('home');
+  const [recurringBudgetId, setRecurringBudgetId] = useState('');
+  const [recurringDescription, setRecurringDescription] = useState('');
+  const [recurringAmount, setRecurringAmount] = useState<number | ''>('');
+  const [recurringFrequency, setRecurringFrequency] = useState<RecurrenceFrequency>('monthly');
+  const [recurringDueDate, setRecurringDueDate] = useState('');
+  const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null);
+  const [recordingSchedule, setRecordingSchedule] = useState<RecurringSchedule | null>(null);
+  const [recordingAmount, setRecordingAmount] = useState<number | ''>('');
+  const [recordingDate, setRecordingDate] = useState('');
+  const [deletingRecurring, setDeletingRecurring] = useState<RecurringSchedule | null>(null);
+  const recurringReminderKeysRef = useRef<Set<string>>(new Set());
 
   function showToast(message: string, type: ToastItem['type'] = 'info') {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -206,6 +233,27 @@ export default function App() {
   }, [savedDataLoaded, budgets, selectedMonth, timeZone, budgetAlertThreshold]);
 
   useEffect(() => {
+    if (!savedDataLoaded) return;
+    const today = getZonedDateKey(new Date(), timeZone);
+    if (!today) return;
+    for (const schedule of recurringSchedules) {
+      const key = `${schedule.id}:${schedule.nextDueDate}`;
+      if (recurringReminderKeysRef.current.has(key)) continue;
+      const daysUntil = getDaysUntilDate(schedule.nextDueDate, today);
+      if (daysUntil > 5) continue;
+      recurringReminderKeysRef.current.add(key);
+      showToast(
+        daysUntil < 0
+          ? `Reminder: ${schedule.description} is overdue`
+          : daysUntil === 0
+            ? `Reminder: ${schedule.description} is due today`
+            : `Reminder: ${schedule.description} is due in ${daysUntil} days`,
+        daysUntil < 0 ? 'error' : 'info'
+      );
+    }
+  }, [savedDataLoaded, recurringSchedules, timeZone]);
+
+  useEffect(() => {
     console.log('App mounted');
     initTheme();
     refresh();
@@ -224,6 +272,9 @@ export default function App() {
         : Number(localStorage.getItem(SAVINGS_PERCENTAGE_KEY)) || 0;
       setSavingsPercentage(storedSavingsPercentage);
       setSavingsGoals(api?.getSavingsGoals ? await api.getSavingsGoals() : readBrowserSavingsGoals());
+      setRecurringSchedules(api?.getRecurringTransactions
+        ? await api.getRecurringTransactions()
+        : readBrowserRecurringSchedules());
       const storedAlertThreshold: number = api?.getBudgetAlertThreshold
         ? await api.getBudgetAlertThreshold()
         : Number(localStorage.getItem(BUDGET_ALERT_THRESHOLD_KEY) ?? '80');
@@ -293,6 +344,163 @@ export default function App() {
       showToast('Savings percentage saved', 'success');
     } catch {
       showToast('Failed to save savings percentage', 'error');
+    }
+  }
+
+  function resetRecurringForm() {
+    setEditingRecurringId(null);
+    setRecurringBudgetId('');
+    setRecurringDescription('');
+    setRecurringAmount('');
+    setRecurringFrequency('monthly');
+    setRecurringDueDate('');
+  }
+
+  function editRecurringSchedule(schedule: RecurringSchedule) {
+    setEditingRecurringId(schedule.id);
+    setRecurringBudgetId(schedule.budgetId);
+    setRecurringDescription(schedule.description);
+    setRecurringAmount(schedule.amount);
+    setRecurringFrequency(schedule.frequency);
+    setRecurringDueDate(schedule.nextDueDate);
+  }
+
+  async function saveRecurringSchedule() {
+    const amount = Number(recurringAmount);
+    if (!recurringBudgetId || !recurringDescription.trim() || recurringAmount === '' || !Number.isFinite(amount) || amount === 0 || !isValidDateKey(recurringDueDate)) {
+      showToast('Choose a category, description, non-zero amount, and valid due date', 'error');
+      return;
+    }
+
+    try {
+      const api = (window as any).api;
+      if (editingRecurringId) {
+        if (api?.updateRecurringTransaction) {
+          await api.updateRecurringTransaction(editingRecurringId, recurringBudgetId, recurringDescription.trim(), amount, recurringDueDate, recurringFrequency);
+        } else {
+          const schedules = readBrowserRecurringSchedules();
+          const index = schedules.findIndex((schedule) => schedule.id === editingRecurringId);
+          if (index < 0) throw new Error('Recurring transaction not found');
+          schedules[index] = {
+            ...schedules[index],
+            budgetId: recurringBudgetId,
+            description: recurringDescription.trim(),
+            amount,
+            frequency: recurringFrequency,
+            nextDueDate: recurringDueDate,
+            ...(recurringFrequency === 'monthly' ? { dayOfMonth: Number(recurringDueDate.slice(-2)) } : { dayOfMonth: undefined }),
+          };
+          writeBrowserRecurringSchedules(schedules);
+        }
+      } else if (api?.createRecurringTransaction) {
+        await api.createRecurringTransaction(recurringBudgetId, recurringDescription.trim(), amount, recurringDueDate, recurringFrequency);
+      } else {
+        writeBrowserRecurringSchedules([
+          ...readBrowserRecurringSchedules(),
+          {
+            id: makeBrowserId(),
+            budgetId: recurringBudgetId,
+            description: recurringDescription.trim(),
+            amount,
+            frequency: recurringFrequency,
+            nextDueDate: recurringDueDate,
+            ...(recurringFrequency === 'monthly' ? { dayOfMonth: Number(recurringDueDate.slice(-2)) } : {}),
+          },
+        ]);
+      }
+      resetRecurringForm();
+      await refresh();
+      showToast(editingRecurringId ? 'Recurring schedule updated' : 'Recurring schedule created', 'success');
+    } catch {
+      showToast('Failed to save recurring schedule', 'error');
+    }
+  }
+
+  function beginRecordingOccurrence(schedule: RecurringSchedule) {
+    setRecordingSchedule(schedule);
+    setRecordingAmount(schedule.amount);
+    setRecordingDate(schedule.nextDueDate);
+  }
+
+  async function recordRecurringOccurrence() {
+    if (!recordingSchedule || recordingAmount === '' || !Number.isFinite(Number(recordingAmount))) {
+      showToast('Enter a valid transaction amount', 'error');
+      return;
+    }
+    const date = zonedNoonToIso(recordingDate, timeZone);
+    if (!date) {
+      showToast('Choose a valid transaction date', 'error');
+      return;
+    }
+
+    try {
+      const amount = Number(recordingAmount);
+      const api = (window as any).api;
+      if (api?.completeRecurringTransaction) {
+        await api.completeRecurringTransaction(recordingSchedule.id, amount, date);
+        if (current?.id === recordingSchedule.budgetId && api?.getTransactions) {
+          setTxs(await api.getTransactions(current.id));
+        }
+      } else {
+        const schedules = readBrowserRecurringSchedules();
+        const schedule = schedules.find((item) => item.id === recordingSchedule.id);
+        if (!schedule) throw new Error('Recurring transaction not found');
+        const budgets = readBrowserBudgets();
+        const budget = budgets.find((item) => item.id === schedule.budgetId);
+        if (!budget) throw new Error('Budget not found');
+        const transaction: Transaction = {
+          id: makeBrowserId(),
+          description: schedule.description,
+          amount,
+          date,
+        };
+        budget.transactions = [...(budget.transactions || []), transaction];
+        schedule.nextDueDate = getNextOccurrenceDate(schedule.nextDueDate, schedule.frequency, schedule.dayOfMonth);
+        writeBrowserBudgets(budgets);
+        writeBrowserRecurringSchedules(schedules);
+        if (current?.id === budget.id) setTxs((items) => [...items, transaction]);
+      }
+      setRecordingSchedule(null);
+      await refresh();
+      showToast('Recurring transaction recorded; next due date advanced', 'success');
+    } catch {
+      showToast('Failed to record recurring transaction', 'error');
+    }
+  }
+
+  async function skipRecurringOccurrence(schedule: RecurringSchedule) {
+    try {
+      const api = (window as any).api;
+      if (api?.skipRecurringOccurrence) {
+        await api.skipRecurringOccurrence(schedule.id);
+      } else {
+        const schedules = readBrowserRecurringSchedules();
+        const storedSchedule = schedules.find((item) => item.id === schedule.id);
+        if (!storedSchedule) throw new Error('Recurring transaction not found');
+        storedSchedule.nextDueDate = getNextOccurrenceDate(storedSchedule.nextDueDate, storedSchedule.frequency, storedSchedule.dayOfMonth);
+        writeBrowserRecurringSchedules(schedules);
+      }
+      await refresh();
+      showToast('Recurring occurrence skipped', 'info');
+    } catch {
+      showToast('Failed to skip recurring occurrence', 'error');
+    }
+  }
+
+  async function deleteRecurringSchedule(schedule: RecurringSchedule) {
+    try {
+      const api = (window as any).api;
+      if (api?.deleteRecurringTransaction) {
+        await api.deleteRecurringTransaction(schedule.id);
+      } else {
+        writeBrowserRecurringSchedules(readBrowserRecurringSchedules().filter((item) => item.id !== schedule.id));
+      }
+      if (editingRecurringId === schedule.id) resetRecurringForm();
+      setDeletingRecurring(null);
+      await refresh();
+      showToast('Recurring schedule deleted', 'info');
+    } catch {
+      showToast('Failed to delete recurring schedule', 'error');
     }
   }
 
@@ -584,6 +792,7 @@ export default function App() {
     month: 'long',
     year: 'numeric',
   }).format(new Date(selectedYear, selectedMonthNumber - 1, 1));
+  const todayDateKey = getZonedDateKey(new Date(), timeZone) || getMonthInputValue() + '-01';
   const totalTransactions = budgets.reduce(
     (total, budget) => total + getTransactionsForMonth(
       budget.transactions || [],
@@ -633,6 +842,13 @@ export default function App() {
             onClick={() => setPage('transactions')}
           >
             Transactions
+          </button>
+          <button
+            className={page === 'recurring' ? 'active' : 'btn muted'}
+            aria-current={page === 'recurring' ? 'page' : undefined}
+            onClick={() => setPage('recurring')}
+          >
+            Recurring
           </button>
           <button
             className={page === 'savings' ? 'active' : 'btn muted'}
@@ -987,6 +1203,79 @@ export default function App() {
               ))}
             </ul>
           </section>
+        ) : page === 'recurring' ? (
+          <section className="recurring-page" aria-labelledby="recurring-heading">
+            <h2 id="recurring-heading">Recurring transactions</h2>
+            <p className="muted">Manage weekly and monthly bills or income. In-app reminders appear five days before they are due. Bills use positive amounts; income uses negative amounts.</p>
+            {budgets.length === 0 ? (
+              <div className="empty">Create a category before scheduling a recurring transaction.</div>
+            ) : (
+              <section className="settings-card recurring-form" aria-label={editingRecurringId ? 'Edit recurring schedule' : 'Create recurring schedule'}>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="recurring-category">Category</label>
+                  <select id="recurring-category" value={recurringBudgetId} onChange={(e) => setRecurringBudgetId(e.target.value)}>
+                    <option value="">Choose a category</option>
+                    {budgets.map((budget) => <option key={budget.id} value={budget.id}>{budget.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="recurring-description">Description</label>
+                  <input id="recurring-description" value={recurringDescription} onChange={(e) => setRecurringDescription(e.target.value)} placeholder="Rent, paycheck, etc." />
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="recurring-amount">Amount</label>
+                  <input id="recurring-amount" type="number" step="0.01" value={recurringAmount} onChange={(e) => setRecurringAmount(e.target.value === '' ? '' : Number(e.target.value))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="recurring-frequency">Repeats</label>
+                  <select id="recurring-frequency" value={recurringFrequency} onChange={(e) => setRecurringFrequency(e.target.value as RecurrenceFrequency)}>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="recurring-due-date">Next due date</label>
+                  <input id="recurring-due-date" type="date" value={recurringDueDate} onChange={(e) => setRecurringDueDate(e.target.value)} />
+                </div>
+                <div className="actions recurring-form-actions">
+                  <button onClick={saveRecurringSchedule}>{editingRecurringId ? 'Save Schedule' : 'Add Schedule'}</button>
+                  {editingRecurringId && <button className="btn muted" onClick={resetRecurringForm}>Cancel Edit</button>}
+                </div>
+              </section>
+            )}
+            <section className="cards" aria-label="Scheduled transactions">
+              {recurringSchedules.length === 0 ? (
+                <div className="empty">No recurring transactions scheduled yet.</div>
+              ) : recurringSchedules.map((schedule) => {
+                const daysUntil = getDaysUntilDate(schedule.nextDueDate, todayDateKey);
+                const budgetName = budgets.find((budget) => budget.id === schedule.budgetId)?.name || 'Unknown category';
+                const dueLabel = daysUntil < 0
+                  ? `Overdue by ${Math.abs(daysUntil)} ${Math.abs(daysUntil) === 1 ? 'day' : 'days'}`
+                  : daysUntil === 0
+                    ? 'Due today'
+                    : `Due in ${daysUntil} ${daysUntil === 1 ? 'day' : 'days'}`;
+                return (
+                  <div className="card recurring-card" key={schedule.id}>
+                    <div className="card-left">
+                      <div className="card-title">{schedule.description}</div>
+                      <div className="muted">{budgetName}</div>
+                      <div className={`amount ${schedule.amount < 0 ? 'neg' : 'pos'}`}>{formatCurrency(schedule.amount)}</div>
+                      <div className="muted small">Repeats {schedule.frequency}</div>
+                      <div className={daysUntil <= 5 ? 'recurring-due soon' : 'recurring-due'}>
+                        {dueLabel} · {new Date(`${schedule.nextDueDate}T12:00:00`).toLocaleDateString()}
+                      </div>
+                      <div className="actions recurring-actions">
+                        <button onClick={() => beginRecordingOccurrence(schedule)}>Record occurrence</button>
+                        <button className="btn muted" onClick={() => skipRecurringOccurrence(schedule)}>Skip</button>
+                        <button className="btn muted" onClick={() => editRecurringSchedule(schedule)}>Edit</button>
+                        <button className="btn danger" onClick={() => setDeletingRecurring(schedule)}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          </section>
         ) : page === 'savings' ? (
           <section className="savings-page" aria-labelledby="savings-heading">
             <h2 id="savings-heading">Savings Goals</h2>
@@ -1227,7 +1516,46 @@ export default function App() {
             </div>
           </Modal>
         )}
-        {deletingSavingsGoal && (
+        {recordingSchedule && (
+          <Modal
+            title={'Record ' + recordingSchedule.description}
+            onClose={() => setRecordingSchedule(null)}
+            onConfirm={recordRecurringOccurrence}
+            confirmLabel="Record transaction"
+          >
+            <div className="goal-modal-fields">
+              <div className="form-field">
+                <label className="form-label" htmlFor="recurring-occurrence-amount">Actual amount</label>
+                <input
+                  id="recurring-occurrence-amount"
+                  type="number"
+                  step="0.01"
+                  value={recordingAmount}
+                  onChange={(e) => setRecordingAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label" htmlFor="recurring-occurrence-date">Transaction date</label>
+                <input
+                  id="recurring-occurrence-date"
+                  type="date"
+                  value={recordingDate}
+                  onChange={(e) => setRecordingDate(e.target.value)}
+                />
+              </div>
+            </div>
+          </Modal>
+        )}
+        {deletingRecurring && (
+          <Modal
+            title={'Delete ' + deletingRecurring.description + '?'}
+            onClose={() => setDeletingRecurring(null)}
+            onConfirm={() => deleteRecurringSchedule(deletingRecurring)}
+            confirmLabel="Delete schedule"
+          >
+            <p>This removes the recurring reminder. Already recorded transactions are not affected.</p>
+          </Modal>
+        )}        {deletingSavingsGoal && (
           <Modal
             title={`Delete ${deletingSavingsGoal.name}?`}
             onClose={() => setDeletingSavingsGoal(null)}

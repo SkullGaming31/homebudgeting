@@ -5,8 +5,8 @@
 1. **Monthly budget periods** (implemented)
    - Navigate by month; category totals, transaction lists, and global balances use only the selected month's transactions.
    - Category limits and monthly global income repeat each month; new transactions can be dated within the selected month.
-2. **Recurring transactions**
-   - Schedule regular bills and income, with reminders for upcoming transactions.
+2. **Recurring transactions** (implemented)
+   - Schedule weekly or monthly bills and income, with in-app reminders five days before the due date.
 3. **Budget alerts** (implemented)
    - Show inline warnings and toasts when spending reaches the configurable monthly threshold or exceeds the category limit.
 4. **Spending summaries** (implemented)

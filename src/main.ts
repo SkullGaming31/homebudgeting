@@ -98,6 +98,30 @@ ipcMain.handle('setTimeZone', async (_ev, timeZone: string) => {
   return store.setTimeZone(timeZone);
 });
 
+ipcMain.handle('getRecurringTransactions', async () => {
+  return store.getRecurringTransactions();
+});
+
+ipcMain.handle('createRecurringTransaction', async (_ev, budgetId: string, description: string, amount: number, nextDueDate: string, frequency: 'weekly' | 'monthly') => {
+  return store.createRecurringTransaction(budgetId, description, amount, nextDueDate, frequency);
+});
+
+ipcMain.handle('updateRecurringTransaction', async (_ev, id: string, budgetId: string, description: string, amount: number, nextDueDate: string, frequency: 'weekly' | 'monthly') => {
+  return store.updateRecurringTransaction(id, budgetId, description, amount, nextDueDate, frequency);
+});
+
+ipcMain.handle('completeRecurringTransaction', async (_ev, id: string, amount: number, date: string) => {
+  return store.completeRecurringTransaction(id, amount, date);
+});
+
+ipcMain.handle('skipRecurringOccurrence', async (_ev, id: string) => {
+  return store.skipRecurringOccurrence(id);
+});
+
+ipcMain.handle('deleteRecurringTransaction', async (_ev, id: string) => {
+  return store.deleteRecurringTransaction(id);
+});
+
 ipcMain.handle('getSavingsGoals', async () => {
   return store.getSavingsGoals();
 });
