@@ -4,6 +4,7 @@ import Toasts, { ToastItem } from './components/Toast';
 import { formatCurrency } from './utils';
 import { getBudgetRemaining, getMonthInputValue, getTransactionsForMonth } from '../budget';
 import { calculateSavingsReserve } from '../savings';
+import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
 
 type Budget = { id: string; name: string; limit: number; income?: number; transactions?: Transaction[] };
@@ -492,6 +493,8 @@ export default function App() {
   const globalBalanceBeforeSavings = (Number(globalIncome) || 0) - totalTransactions;
   const savingsReserve = calculateSavingsReserve(globalBalanceBeforeSavings, Number(savingsPercentage) || 0);
   const remainingGlobal = globalBalanceBeforeSavings - savingsReserve;
+  const spendingSummary = getSpendingSummary(budgets, selectedMonth);
+  const maxMonthlySpending = Math.max(...spendingSummary.months.map(({ total }) => total), 1);
   const filteredTransactions = filterTransactions(
     budgets.flatMap((budget) => (budget.transactions || []).map((transaction) => ({
       ...transaction,
@@ -604,6 +607,57 @@ export default function App() {
           <div className="summary-row">
             <span className="muted small">Savings reserve ({Number(savingsPercentage) || 0}%)</span>
             <span className="amount">{formatCurrency(savingsReserve)}</span>
+          </div>
+        </section>
+        <section className="spending-summary" aria-labelledby="spending-summary-heading">
+          <div className="spending-summary-header">
+            <div>
+              <h2 id="spending-summary-heading">Spending summary</h2>
+              <p className="muted small">For {selectedMonthLabel}; trend covers the selected month and previous five months.</p>
+            </div>
+            <div className="spending-summary-total">
+              <span className="muted small">Total spent</span>
+              <strong>{formatCurrency(spendingSummary.total)}</strong>
+            </div>
+          </div>
+          <div className="spending-summary-panels">
+            <div className="spending-panel">
+              <h3>By category</h3>
+              {spendingSummary.categories.length === 0 ? (
+                <p className="muted small">No spending recorded for {selectedMonthLabel}.</p>
+              ) : (
+                <ul className="spending-category-list">
+                  {spendingSummary.categories.map(({ name: categoryName, total }) => (
+                    <li key={categoryName}>
+                      <span>{categoryName}</span>
+                      <strong>{formatCurrency(total)}</strong>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="spending-panel">
+              <h3>Monthly trend</h3>
+              <ol className="spending-trend" aria-label={`Spending for the six months ending ${selectedMonthLabel}`}>
+                {spendingSummary.months.map(({ month, total }) => {
+                  const [trendYear, trendMonth] = month.split('-').map(Number);
+                  const monthLabel = new Intl.DateTimeFormat(undefined, { month: 'short' })
+                    .format(new Date(trendYear, trendMonth - 1, 1));
+                  return (
+                    <li key={month} aria-label={`${monthLabel} ${trendYear}: ${formatCurrency(total)}`}>
+                      <strong>{formatCurrency(total)}</strong>
+                      <div className="spending-trend-track" aria-hidden="true">
+                        <div
+                          className="spending-trend-bar"
+                          style={{ height: total > 0 ? `${Math.max((total / maxMonthlySpending) * 100, 3)}%` : '0%' }}
+                        />
+                      </div>
+                      <span className="muted small">{monthLabel}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
           </div>
         </section>
         <section className="create">

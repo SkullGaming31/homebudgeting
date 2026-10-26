@@ -11,6 +11,7 @@ const {
   getTransactionsForMonth,
 } = require('../dist/budget');
 const { calculateSavingsReserve } = require('../dist/savings');
+const { getSpendingSummary } = require('../dist/spending');
 const { filterTransactions } = require('../dist/transactions');
 
 function searchableTransaction(id, overrides = {}) {
@@ -231,6 +232,64 @@ describe('calculateSavingsReserve', () => {
     assert.equal(calculateSavingsReserve(0, 50), 0);
     assert.equal(calculateSavingsReserve(-75, 50), 0);
     assert.equal(calculateSavingsReserve(-75, 100), 0);
+  });
+});
+
+describe('getSpendingSummary', () => {
+  it('groups positive spending by category and returns six monthly totals through the selected month', () => {
+    const budgets = [
+      {
+        name: 'Groceries',
+        transactions: [
+          { amount: 30, date: '2025-01-15T12:00:00.000Z' },
+          { amount: 50, date: '2025-06-02T12:00:00.000Z' },
+          { amount: 10, date: '2025-06-20T12:00:00.000Z' },
+          { amount: -5, date: '2025-06-25T12:00:00.000Z' },
+        ],
+      },
+      {
+        name: 'Utilities',
+        transactions: [
+          { amount: 40, date: '2025-06-10T12:00:00.000Z' },
+          { amount: 20, date: '2025-07-02T12:00:00.000Z' },
+        ],
+      },
+    ];
+
+    assert.deepEqual(getSpendingSummary(budgets, '2025-06'), {
+      categories: [
+        { name: 'Groceries', total: 60 },
+        { name: 'Utilities', total: 40 },
+      ],
+      months: [
+        { month: '2025-01', total: 30 },
+        { month: '2025-02', total: 0 },
+        { month: '2025-03', total: 0 },
+        { month: '2025-04', total: 0 },
+        { month: '2025-05', total: 0 },
+        { month: '2025-06', total: 100 },
+      ],
+      total: 100,
+    });
+  });
+
+  it('returns zero-filled trend months and no categories when there is no spending', () => {
+    assert.deepEqual(getSpendingSummary([], '2025-01'), {
+      categories: [],
+      months: [
+        { month: '2024-08', total: 0 },
+        { month: '2024-09', total: 0 },
+        { month: '2024-10', total: 0 },
+        { month: '2024-11', total: 0 },
+        { month: '2024-12', total: 0 },
+        { month: '2025-01', total: 0 },
+      ],
+      total: 0,
+    });
+  });
+
+  it('rejects an invalid selected month', () => {
+    assert.throws(() => getSpendingSummary([], '2025-13'), RangeError);
   });
 });
 

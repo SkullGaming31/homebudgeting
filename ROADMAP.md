@@ -9,8 +9,8 @@
    - Schedule regular bills and income, with reminders for upcoming transactions.
 3. **Budget alerts**
    - Notify when a category is nearing its limit or has exceeded it.
-4. **Spending summaries**
-   - Show monthly totals by category and visual spending trends.
+4. **Spending summaries** (implemented)
+   - Show monthly totals by category and a visual trend for the selected month and previous five months.
 5. **Transaction search and filters** (implemented)
    - Search descriptions and filter across all categories and months by category, amount range, and date range.
 6. **Savings goals** (implemented)

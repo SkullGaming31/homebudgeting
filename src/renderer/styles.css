@@ -224,6 +224,107 @@ button[aria-label="Toggle theme"] {
   margin: 0;
 }
 
+.spending-summary {
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.spending-summary-header,
+.spending-summary-panels {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.spending-summary-header {
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.spending-summary-header h2,
+.spending-panel h3 {
+  margin: 0 0 6px;
+}
+
+.spending-summary-header p {
+  margin: 0;
+}
+
+.spending-summary-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.spending-summary-panels > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.spending-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.spending-category-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.spending-category-list li span {
+  overflow-wrap: anywhere;
+}
+
+.spending-trend {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.spending-trend li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.spending-trend li > strong {
+  font-size: 0.72rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.spending-trend-track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 88px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.spending-trend-bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+}
+
 .month-selector {
   display: flex;
   flex-wrap: wrap;
@@ -599,6 +700,22 @@ button[aria-label="Toggle theme"] {
   .settings-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .spending-summary-panels {
+    flex-direction: column;
+  }
+
+  .spending-summary-header {
+    gap: 12px;
+  }
+
+  .spending-trend {
+    gap: 4px;
+  }
+
+  .spending-trend li > strong {
+    font-size: 0.65rem;
   }
 
   .transaction-result {
