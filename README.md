@@ -35,3 +35,4 @@ Notes
 - All main source files live under `src` as requested.
 - IPC API exposed on `window.api` via the preload script.
 - The Home view includes spending totals by category for the selected month and a six-month spending trend ending in that month. Positive transaction amounts count as spending; negative amounts are treated as credits.
+- Settings includes a time zone selector (default: system time zone). It determines which day and month each transaction belongs to, and how transaction times are displayed.

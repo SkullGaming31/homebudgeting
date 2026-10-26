@@ -6,6 +6,7 @@ import { getBudgetRemaining, getMonthInputValue, getTransactionsForMonth } from 
 import { calculateSavingsReserve } from '../savings';
 import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
+import { getZonedDateKey, getZonedMonthKey, zonedNoonToIso } from '../timezone';
 
 type Budget = { id: string; name: string; limit: number; income?: number; transactions?: Transaction[] };
 type Transaction = { id: string; description: string; amount: number; date: string };
@@ -16,6 +17,20 @@ const GLOBAL_INCOME_KEY = 'home-budgeting-global-income';
 const BUDGETS_KEY = 'home-budgeting-budgets';
 const SAVINGS_PERCENTAGE_KEY = 'home-budgeting-savings-percentage';
 const SAVINGS_GOALS_KEY = 'home-budgeting-savings-goals';
+const TIME_ZONE_KEY = 'home-budgeting-time-zone';
+
+function getTimeZoneOptions(): string[] {
+  const supported = (Intl as any).supportedValuesOf;
+  return typeof supported === 'function' ? supported.call(Intl, 'timeZone') : ['UTC'];
+}
+
+function getSystemTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+function formatDateTime(value: string, timeZone: string) {
+  return new Date(value).toLocaleString(undefined, { timeZone: timeZone || undefined });
+}
 
 function readBrowserBudgets(): Budget[] {
   const stored = localStorage.getItem(BUDGETS_KEY);
@@ -53,15 +68,9 @@ function makeBrowserId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function getLocalDateInputValue(date = new Date()) {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${getMonthInputValue(date)}-${day}`;
-}
-
-function getDefaultTransactionDate(month: string) {
-  const today = new Date();
-  return getMonthInputValue(today) === month ? getLocalDateInputValue(today) : `${month}-01`;
+function getDefaultTransactionDate(month: string, timeZone: string) {
+  const today = getZonedDateKey(new Date(), timeZone) || '';
+  return today.startsWith(`${month}-`) ? today : `${month}-01`;
 }
 
 function getLastDateOfMonth(month: string) {
@@ -133,6 +142,8 @@ export default function App() {
   const [globalIncome, setGlobalIncome] = useState<number | ''>(0);
   const [savingsPercentage, setSavingsPercentage] = useState<number | ''>(0);
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthInputValue());
+  const [timeZone, setTimeZone] = useState('');
+  const [timeZoneDraft, setTimeZoneDraft] = useState('');
   const [savingsGoalName, setSavingsGoalName] = useState('');
   const [savingsGoalTarget, setSavingsGoalTarget] = useState<number | ''>('');
   const [editingSavingsGoal, setEditingSavingsGoal] = useState<SavingsGoal | null>(null);
@@ -172,8 +183,29 @@ export default function App() {
         : Number(localStorage.getItem(SAVINGS_PERCENTAGE_KEY)) || 0;
       setSavingsPercentage(storedSavingsPercentage);
       setSavingsGoals(api?.getSavingsGoals ? await api.getSavingsGoals() : readBrowserSavingsGoals());
+      const storedTimeZone: string = api?.getTimeZone
+        ? await api.getTimeZone()
+        : localStorage.getItem(TIME_ZONE_KEY) || '';
+      setTimeZone(storedTimeZone);
+      setTimeZoneDraft(storedTimeZone);
+      setSelectedMonth(getZonedMonthKey(new Date(), storedTimeZone) || getMonthInputValue());
     } catch {
       showToast('Failed to load saved data', 'error');
+    }
+  }
+
+  async function saveTimeZone() {
+    try {
+      const api = (window as any).api;
+      const savedTimeZone: string = api?.setTimeZone
+        ? await api.setTimeZone(timeZoneDraft)
+        : (localStorage.setItem(TIME_ZONE_KEY, timeZoneDraft), timeZoneDraft);
+      setTimeZone(savedTimeZone);
+      setTimeZoneDraft(savedTimeZone);
+      setSelectedMonth(getZonedMonthKey(new Date(), savedTimeZone) || getMonthInputValue());
+      showToast('Time zone saved', 'success');
+    } catch {
+      showToast('Failed to save time zone', 'error');
     }
   }
 
@@ -486,14 +518,15 @@ export default function App() {
   const totalTransactions = budgets.reduce(
     (total, budget) => total + getTransactionsForMonth(
       budget.transactions || [],
-      selectedMonth
+      selectedMonth,
+      timeZone
     ).reduce((sum, transaction) => sum + (transaction.amount || 0), 0),
     0
   );
   const globalBalanceBeforeSavings = (Number(globalIncome) || 0) - totalTransactions;
   const savingsReserve = calculateSavingsReserve(globalBalanceBeforeSavings, Number(savingsPercentage) || 0);
   const remainingGlobal = globalBalanceBeforeSavings - savingsReserve;
-  const spendingSummary = getSpendingSummary(budgets, selectedMonth);
+  const spendingSummary = getSpendingSummary(budgets, selectedMonth, timeZone);
   const maxMonthlySpending = Math.max(...spendingSummary.months.map(({ total }) => total), 1);
   const filteredTransactions = filterTransactions(
     budgets.flatMap((budget) => (budget.transactions || []).map((transaction) => ({
@@ -508,6 +541,7 @@ export default function App() {
       maxAmount: transactionMaxAmount === '' ? undefined : transactionMaxAmount,
       fromDate: transactionFromDate,
       toDate: transactionToDate,
+      timeZone,
     }
   );
 
@@ -676,7 +710,7 @@ export default function App() {
         <section className="cards">
           {budgets.length === 0 && <div className="empty">No budgets yet — create one.</div>}
           {budgets.map((b) => {
-            const monthTransactions = getTransactionsForMonth(b.transactions || [], selectedMonth);
+            const monthTransactions = getTransactionsForMonth(b.transactions || [], selectedMonth, timeZone);
             const remaining = getBudgetRemaining(b.limit, monthTransactions);
             return (
               <div className="card" key={b.id}>
@@ -725,10 +759,11 @@ export default function App() {
                 key={selectedMonth}
                 categoryName={current.name}
                 month={selectedMonth}
+                timeZone={timeZone}
                 onAdd={addTransaction}
               />
               <ul>
-                {getTransactionsForMonth(txs, selectedMonth).map((t) => (
+                {getTransactionsForMonth(txs, selectedMonth, timeZone).map((t) => (
                   <li key={t.id} className="tx">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <svg className="icon tx-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -739,7 +774,7 @@ export default function App() {
                       </svg>
                       <div>
                         {t.description}
-                        <div className="muted small">{new Date(t.date).toLocaleString()}</div>
+                        <div className="muted small">{formatDateTime(t.date, timeZone)}</div>
                       </div>
                     </div>
                     <div className="tx-actions">
@@ -848,7 +883,7 @@ export default function App() {
                   <div className="transaction-result-description">
                     <strong>{transaction.description}</strong>
                     <span className="muted small">{transaction.budgetName}</span>
-                    <span className="muted small">{new Date(transaction.date).toLocaleString()}</span>
+                    <span className="muted small">{formatDateTime(transaction.date, timeZone)}</span>
                   </div>
                   <div className="tx-actions">
                     <div className={`amount ${transaction.amount < 0 ? 'neg' : 'pos'}`}>
@@ -976,6 +1011,25 @@ export default function App() {
               </div>
               <button onClick={saveGlobalIncome}>Save Changes</button>
             </div>
+            <div className="settings-card">
+              <div className="form-field">
+                <label className="form-label" htmlFor="time-zone">Time zone</label>
+                <select
+                  id="time-zone"
+                  value={timeZoneDraft}
+                  onChange={(e) => setTimeZoneDraft(e.target.value)}
+                >
+                  <option value="">System default ({getSystemTimeZone()})</option>
+                  {getTimeZoneOptions().map((zone) => (
+                    <option key={zone} value={zone}>{zone}</option>
+                  ))}
+                </select>
+              </div>
+              <button onClick={saveTimeZone}>Save Time Zone</button>
+            </div>
+            <p className="muted small">
+              The time zone decides which month and day each transaction belongs to, and how transaction times are shown.
+            </p>
             <div className="settings-card">
               <div className="form-field">
                 <label className="form-label" htmlFor="savings-percentage">Savings reserve percentage</label>
@@ -1174,29 +1228,31 @@ export default function App() {
 function TxForm({
   categoryName,
   month,
+  timeZone,
   onAdd,
 }: {
   categoryName: string;
   month: string;
+  timeZone: string;
   onAdd: (desc: string, amount: number, date: string) => Promise<boolean>;
 }) {
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState<number | ''>('');
-  const [transactionDate, setTransactionDate] = useState(() => getDefaultTransactionDate(month));
+  const [transactionDate, setTransactionDate] = useState(() => getDefaultTransactionDate(month, timeZone));
   const [dateError, setDateError] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const transactionIso = zonedNoonToIso(transactionDate, timeZone);
 
   async function confirmAdd() {
-    if (submitting) return;
+    if (submitting || !transactionIso) return;
     setSubmitting(true);
     try {
-      const date = new Date(`${transactionDate}T12:00:00`).toISOString();
-      if (await onAdd(desc, Number(amount) || 0, date)) {
+      if (await onAdd(desc, Number(amount) || 0, transactionIso)) {
         setConfirming(false);
         setDesc('');
         setAmount('');
-        setTransactionDate(getDefaultTransactionDate(month));
+        setTransactionDate(getDefaultTransactionDate(month, timeZone));
       }
     } finally {
       setSubmitting(false);
@@ -1224,9 +1280,7 @@ function TxForm({
         <button
           onClick={() => {
             if (!desc.trim()) return;
-            const parsedDate = new Date(`${transactionDate}T12:00:00`);
-            if (!transactionDate || !Number.isFinite(parsedDate.getTime()) ||
-              getMonthInputValue(parsedDate) !== month) {
+            if (!transactionIso || !transactionDate.startsWith(`${month}-`)) {
               setDateError('Choose a valid date within the selected month');
               return;
             }
@@ -1245,7 +1299,7 @@ function TxForm({
         >
           <p>Add this transaction to {categoryName}?</p>
           <p><strong>{desc}</strong>: {formatCurrency(Number(amount) || 0)}</p>
-          <p>Date: {new Date(`${transactionDate}T12:00:00`).toLocaleDateString()}</p>
+          <p>Date: {transactionIso && new Date(transactionIso).toLocaleDateString(undefined, { timeZone: timeZone || undefined })}</p>
         </Modal>
       )}
     </>

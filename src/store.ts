@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { AppData, Budget, SavingsGoal, Transaction } from './types';
+import { isValidTimeZone } from './timezone';
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -50,6 +51,21 @@ export class Store {
     this.data.savingsPercentage = percentage;
     await this.save();
     return this.data.savingsPercentage;
+  }
+
+  async getTimeZone() {
+    await this.load();
+    return this.data.timeZone || '';
+  }
+
+  async setTimeZone(timeZone: string) {
+    if (typeof timeZone !== 'string' || (timeZone && !isValidTimeZone(timeZone))) {
+      throw new Error('Time zone must be empty or a valid IANA time zone');
+    }
+    await this.load();
+    this.data.timeZone = timeZone;
+    await this.save();
+    return this.data.timeZone;
   }
 
   async getSavingsGoals() {

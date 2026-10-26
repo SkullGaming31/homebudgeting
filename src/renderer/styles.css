@@ -427,6 +427,15 @@ button[aria-label="Toggle theme"] {
   margin-right: 0;
 }
 
+.settings-card select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
 .goal-progress {
   width: 100%;
   height: 10px;

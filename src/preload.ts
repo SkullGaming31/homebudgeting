@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('api', {
   setGlobalIncome: (amount: number) => ipcRenderer.invoke('setGlobalIncome', amount),
   getSavingsPercentage: () => ipcRenderer.invoke('getSavingsPercentage'),
   setSavingsPercentage: (percentage: number) => ipcRenderer.invoke('setSavingsPercentage', percentage),
+  getTimeZone: () => ipcRenderer.invoke('getTimeZone'),
+  setTimeZone: (timeZone: string) => ipcRenderer.invoke('setTimeZone', timeZone),
   getSavingsGoals: () => ipcRenderer.invoke('getSavingsGoals'),
   createSavingsGoal: (name: string, target: number) => ipcRenderer.invoke('createSavingsGoal', name, target),
   updateSavingsGoal: (id: string, name: string, target: number, saved: number) =>

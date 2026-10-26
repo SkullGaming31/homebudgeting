@@ -82,6 +82,14 @@ ipcMain.handle('setSavingsPercentage', async (_ev, percentage: number) => {
   return store.setSavingsPercentage(percentage);
 });
 
+ipcMain.handle('getTimeZone', async () => {
+  return store.getTimeZone();
+});
+
+ipcMain.handle('setTimeZone', async (_ev, timeZone: string) => {
+  return store.setTimeZone(timeZone);
+});
+
 ipcMain.handle('getSavingsGoals', async () => {
   return store.getSavingsGoals();
 });

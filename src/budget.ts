@@ -1,3 +1,5 @@
+import { getZonedMonthKey, TimeZone } from './timezone';
+
 export function getBudgetRemaining(
   limit: number,
   transactions: readonly { amount: number }[] = []
@@ -11,15 +13,14 @@ export function getMonthInputValue(date = new Date()) {
   return `${date.getFullYear()}-${month}`;
 }
 
-export function getMonthKey(date: string) {
-  const parsed = new Date(date);
-  if (!Number.isFinite(parsed.getTime())) return null;
-  return getMonthInputValue(parsed);
+export function getMonthKey(date: string, timeZone?: TimeZone) {
+  return getZonedMonthKey(date, timeZone);
 }
 
 export function getTransactionsForMonth<T extends { date: string }>(
   transactions: readonly T[],
-  month: string
+  month: string,
+  timeZone?: TimeZone
 ) {
-  return transactions.filter((transaction) => getMonthKey(transaction.date) === month);
+  return transactions.filter((transaction) => getMonthKey(transaction.date, timeZone) === month);
 }

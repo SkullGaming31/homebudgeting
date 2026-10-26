@@ -1,3 +1,5 @@
+import { getZonedDateKey } from './timezone';
+
 export interface SearchableTransaction {
   id: string;
   description: string;
@@ -14,15 +16,7 @@ export interface TransactionFilters {
   maxAmount?: number;
   fromDate: string;
   toDate: string;
-}
-
-function localDateKey(value: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  timeZone?: string;
 }
 
 export function filterTransactions<T extends SearchableTransaction>(
@@ -33,7 +27,7 @@ export function filterTransactions<T extends SearchableTransaction>(
 
   return transactions
     .filter((transaction) => {
-      const date = localDateKey(transaction.date);
+      const date = getZonedDateKey(transaction.date, filters.timeZone);
       if (!date) return false;
       if (query && !transaction.description.toLocaleLowerCase().includes(query)) return false;
       if (filters.budgetId && transaction.budgetId !== filters.budgetId) return false;

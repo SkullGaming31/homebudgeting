@@ -25,4 +25,5 @@ export interface AppData {
   globalIncome?: number;
   savingsPercentage?: number;
   savingsGoals?: SavingsGoal[];
+  timeZone?: string;
 }

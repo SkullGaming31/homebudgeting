@@ -1,4 +1,5 @@
 import { getMonthInputValue, getMonthKey } from './budget';
+import { TimeZone } from './timezone';
 
 interface SpendingTransaction {
   amount: number;
@@ -28,7 +29,8 @@ export interface SpendingSummary {
 
 export function getSpendingSummary(
   budgets: readonly SpendingBudget[],
-  selectedMonth: string
+  selectedMonth: string,
+  timeZone?: TimeZone
 ): SpendingSummary {
   const [year, month] = selectedMonth.split('-').map(Number);
   const monthStart = new Date(year, month - 1, 1);
@@ -50,7 +52,7 @@ export function getSpendingSummary(
   for (const budget of budgets) {
     for (const transaction of budget.transactions || []) {
       if (transaction.amount <= 0) continue;
-      const transactionMonth = getMonthKey(transaction.date);
+      const transactionMonth = getMonthKey(transaction.date, timeZone);
       if (!transactionMonth) continue;
 
       if (transactionMonth === selectedMonth) {

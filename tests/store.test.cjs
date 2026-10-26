@@ -12,6 +12,11 @@ const {
 } = require('../dist/budget');
 const { calculateSavingsReserve } = require('../dist/savings');
 const { getSpendingSummary } = require('../dist/spending');
+const {
+  getZonedDateKey,
+  isValidTimeZone,
+  zonedNoonToIso,
+} = require('../dist/timezone');
 const { filterTransactions } = require('../dist/transactions');
 
 function searchableTransaction(id, overrides = {}) {
@@ -221,6 +226,101 @@ describe('monthly transaction helpers', () => {
   });
 });
 
+describe('time zone support', () => {
+  it('validates IANA time zone names', () => {
+    assert.equal(isValidTimeZone('UTC'), true);
+    assert.equal(isValidTimeZone('America/St_Johns'), true);
+    assert.equal(isValidTimeZone('Not/AZone'), false);
+  });
+
+  it('assigns the same instant to different dates and months by time zone', () => {
+    const instant = '2025-03-01T00:30:00.000Z';
+
+    assert.equal(getZonedDateKey(instant, 'UTC'), '2025-03-01');
+    assert.equal(getZonedDateKey(instant, 'America/Los_Angeles'), '2025-02-28');
+    assert.equal(getZonedDateKey(instant, 'Pacific/Auckland'), '2025-03-01');
+    assert.equal(getMonthKey(instant, 'UTC'), '2025-03');
+    assert.equal(getMonthKey(instant, 'America/Los_Angeles'), '2025-02');
+    assert.equal(getZonedDateKey('not-a-date', 'UTC'), null);
+  });
+
+  it('uses the system time zone when no time zone is selected', () => {
+    const previousTimeZone = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+
+    try {
+      const instant = '2025-01-01T01:00:00.000Z';
+      assert.equal(getZonedDateKey(instant), '2024-12-31');
+      assert.equal(getMonthKey(instant), '2024-12');
+      assert.deepEqual(
+        getTransactionsForMonth([{ date: instant }], '2024-12').map(({ date }) => date),
+        [instant]
+      );
+      assert.equal(getZonedDateKey(instant, 'UTC'), '2025-01-01');
+    } finally {
+      if (previousTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimeZone;
+    }
+  });
+
+  it('groups transactions and spending by the selected time zone', () => {
+    const transactions = [{ id: 'edge', amount: 25, date: '2025-03-01T00:30:00.000Z' }];
+
+    assert.equal(getTransactionsForMonth(transactions, '2025-03', 'UTC').length, 1);
+    assert.equal(getTransactionsForMonth(transactions, '2025-03', 'America/Los_Angeles').length, 0);
+    assert.equal(getTransactionsForMonth(transactions, '2025-02', 'America/Los_Angeles').length, 1);
+
+    const budgets = [{ name: 'Edge', transactions }];
+    assert.equal(getSpendingSummary(budgets, '2025-03', 'UTC').total, 25);
+    assert.equal(getSpendingSummary(budgets, '2025-03', 'America/Los_Angeles').total, 0);
+    assert.equal(getSpendingSummary(budgets, '2025-02', 'America/Los_Angeles').total, 25);
+  });
+
+  it('applies the time zone to transaction date range filters', () => {
+    const transactions = [
+      searchableTransaction('edge', { date: '2025-03-01T00:30:00.000Z' }),
+    ];
+    const filters = transactionFilters({ fromDate: '2025-03-01', toDate: '2025-03-01' });
+
+    assert.equal(filterTransactions(transactions, { ...filters, timeZone: 'UTC' }).length, 1);
+    assert.equal(
+      filterTransactions(transactions, { ...filters, timeZone: 'America/Los_Angeles' }).length,
+      0
+    );
+  });
+
+  it('stores noon on the chosen calendar date in that time zone, including across DST', () => {
+    assert.equal(zonedNoonToIso('2025-03-01', 'UTC'), '2025-03-01T12:00:00.000Z');
+    assert.equal(zonedNoonToIso('2025-01-15', 'America/Los_Angeles'), '2025-01-15T20:00:00.000Z');
+    assert.equal(zonedNoonToIso('2025-07-15', 'America/Los_Angeles'), '2025-07-15T19:00:00.000Z');
+    assert.equal(zonedNoonToIso('2025-03-01', 'Pacific/Auckland'), '2025-02-28T23:00:00.000Z');
+
+    for (const zone of ['UTC', 'America/Los_Angeles', 'Pacific/Auckland', 'Pacific/Kiritimati']) {
+      assert.equal(getZonedDateKey(zonedNoonToIso('2025-03-01', zone), zone), '2025-03-01');
+    }
+  });
+
+  it('converts calendar dates on both daylight-saving transition days', () => {
+    const daylightSavingStarts = zonedNoonToIso('2025-03-09', 'America/Los_Angeles');
+    const daylightSavingEnds = zonedNoonToIso('2025-11-02', 'America/Los_Angeles');
+
+    assert.equal(daylightSavingStarts, '2025-03-09T19:00:00.000Z');
+    assert.equal(daylightSavingEnds, '2025-11-02T20:00:00.000Z');
+    assert.equal(getZonedDateKey(daylightSavingStarts, 'America/Los_Angeles'), '2025-03-09');
+    assert.equal(getZonedDateKey(daylightSavingEnds, 'America/Los_Angeles'), '2025-11-02');
+  });
+
+  it('rejects a calendar date skipped entirely by a time-zone change', () => {
+    assert.equal(zonedNoonToIso('2011-12-30', 'Pacific/Apia'), null);
+  });
+
+  it('rejects malformed or impossible calendar dates', () => {
+    assert.equal(zonedNoonToIso('2025-02-30', 'UTC'), null);
+    assert.equal(zonedNoonToIso('2025-2-1', 'UTC'), null);
+    assert.equal(zonedNoonToIso('', 'UTC'), null);
+  });
+});
+
 describe('calculateSavingsReserve', () => {
   it('applies the percentage to positive remaining balance and handles percentage boundaries', () => {
     assert.equal(calculateSavingsReserve(200, 0), 0);
@@ -288,8 +388,69 @@ describe('getSpendingSummary', () => {
     });
   });
 
+  it('keeps exactly the six-month window across a year boundary', () => {
+    const budgets = [{
+      name: 'Travel',
+      transactions: [
+        { amount: 100, date: '2024-07-15T12:00:00.000Z' },
+        { amount: 20, date: '2024-08-15T12:00:00.000Z' },
+        { amount: 30, date: '2025-01-01T12:00:00.000Z' },
+        { amount: 200, date: '2025-02-15T12:00:00.000Z' },
+      ],
+    }];
+
+    assert.deepEqual(getSpendingSummary(budgets, '2025-01'), {
+      categories: [{ name: 'Travel', total: 30 }],
+      months: [
+        { month: '2024-08', total: 20 },
+        { month: '2024-09', total: 0 },
+        { month: '2024-10', total: 0 },
+        { month: '2024-11', total: 0 },
+        { month: '2024-12', total: 0 },
+        { month: '2025-01', total: 30 },
+      ],
+      total: 30,
+    });
+  });
+
+  it('aggregates budgets with the same category name and sorts tied totals alphabetically', () => {
+    const budgets = [
+      {
+        name: 'Zeta',
+        transactions: [{ amount: 25, date: '2025-06-10T12:00:00.000Z' }],
+      },
+      {
+        name: 'Alpha',
+        transactions: [{ amount: 15, date: '2025-06-11T12:00:00.000Z' }],
+      },
+      {
+        name: 'Zeta',
+        transactions: [{ amount: 15, date: '2025-06-12T12:00:00.000Z' }],
+      },
+    ];
+
+    assert.deepEqual(
+      getSpendingSummary(budgets, '2025-06').categories,
+      [
+        { name: 'Zeta', total: 40 },
+        { name: 'Alpha', total: 15 },
+      ]
+    );
+
+    const tiedSummary = getSpendingSummary([
+      budgets[1],
+      { name: 'Beta', transactions: [{ amount: 15, date: '2025-06-12T12:00:00.000Z' }] },
+    ], '2025-06');
+    assert.deepEqual(tiedSummary.categories, [
+      { name: 'Alpha', total: 15 },
+      { name: 'Beta', total: 15 },
+    ]);
+  });
+
   it('rejects an invalid selected month', () => {
     assert.throws(() => getSpendingSummary([], '2025-13'), RangeError);
+    assert.throws(() => getSpendingSummary([], '2025-1'), RangeError);
+    assert.throws(() => getSpendingSummary([], 'not-a-month'), RangeError);
   });
 });
 
@@ -423,6 +584,21 @@ describe('Store', () => {
 
     const reloaded = new Store();
     assert.equal(await reloaded.getSavingsPercentage(), 100);
+  });
+
+  it('persists a valid time zone, allows clearing it, and rejects unknown zones', async () => {
+    const store = new Store();
+
+    assert.equal(await store.getTimeZone(), '');
+    assert.equal(await store.setTimeZone('America/St_Johns'), 'America/St_Johns');
+    assert.equal(await new Store().getTimeZone(), 'America/St_Johns');
+
+    await assert.rejects(() => store.setTimeZone('Not/AZone'), /time zone/i);
+    await assert.rejects(() => store.setTimeZone(undefined), /time zone/i);
+    assert.equal(await new Store().getTimeZone(), 'America/St_Johns');
+
+    assert.equal(await store.setTimeZone(''), '');
+    assert.equal(await new Store().getTimeZone(), '');
   });
 
   it('rejects savings percentages outside the finite 0-to-100 range', async () => {
