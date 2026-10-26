@@ -479,6 +479,28 @@ button[aria-label="Toggle theme"] {
   color: var(--text);
 }
 
+.data-transfer-card {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.data-transfer-card > div:first-child {
+  flex: 1;
+  min-width: 220px;
+}
+
+.data-transfer-card h3 {
+  margin: 0 0 6px;
+}
+
+.data-transfer-card p {
+  margin: 0;
+}
+
+.data-transfer-card .actions {
+  flex-wrap: wrap;
+}
+
 .goal-progress {
   width: 100%;
   height: 10px;

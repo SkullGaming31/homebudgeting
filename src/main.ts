@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { Store } from './store';
+import type { CsvTransactionRow } from './dataTransfer';
 
 let mainWindow: BrowserWindow | null = null;
 let store: Store;
@@ -68,6 +69,18 @@ app.on('window-all-closed', () => {
 // IPC handlers
 ipcMain.handle('getBudgets', async () => {
   return store.getBudgets();
+});
+
+ipcMain.handle('getAppData', async () => {
+  return store.getAppData();
+});
+
+ipcMain.handle('replaceAppData', async (_ev, data: unknown) => {
+  return store.replaceAppData(data);
+});
+
+ipcMain.handle('importTransactions', async (_ev, rows: CsvTransactionRow[]) => {
+  return store.importTransactions(rows);
 });
 
 ipcMain.handle('getGlobalIncome', async () => {

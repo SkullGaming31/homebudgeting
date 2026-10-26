@@ -38,3 +38,5 @@ Notes
 - Settings includes a time zone selector (default: system time zone). It determines which day and month each transaction belongs to, and how transaction times are displayed.
 - Budget alerts show inline and as toasts when category spending reaches the configurable monthly warning threshold (default 80%) or exceeds its limit.
 - Recurring schedules support weekly and monthly reminders five days ahead; recording an occurrence is manual and advances its next due date.
+- Settings can export transactions as CSV or append CSV files with Category, Description, Amount, and Date columns. Missing categories are created with a zero budget limit.
+- Create a full JSON backup of budgets, transactions, schedules, savings goals, and app settings; restoring a validated backup replaces the current data after confirmation.

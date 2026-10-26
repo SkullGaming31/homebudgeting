@@ -24,6 +24,13 @@ const {
   zonedNoonToIso,
 } = require('../dist/timezone');
 const { filterTransactions } = require('../dist/transactions');
+const {
+  appendCsvTransactions,
+  createAppDataBackup,
+  exportTransactionsCsv,
+  parseAppDataBackup,
+  parseTransactionsCsv,
+} = require('../dist/dataTransfer');
 
 function searchableTransaction(id, overrides = {}) {
   return {
@@ -518,6 +525,152 @@ describe('recurring date helpers', () => {
     assert.throws(() => getNextOccurrenceDate('2025-01-01', 'yearly'), RangeError);
     assert.throws(() => getNextOccurrenceDate('2025-01-01', 'monthly', 0), RangeError);
     assert.throws(() => getNextOccurrenceDate('2025-01-01', 'monthly', 32), RangeError);
+  });
+});
+
+describe('CSV transaction transfer', () => {
+  it('round-trips quoted commas, embedded newlines, negative amounts, and formula-safe text', () => {
+    const budgets = [{
+      id: 'budget-1',
+      name: '=Household',
+      limit: 1000,
+      transactions: [{
+        id: 'transaction-1',
+        description: '=SUM(1,2), "quoted"\nand continued',
+        amount: -42.75,
+        date: '2025-04-12T12:30:00.000Z',
+      }],
+    }];
+
+    const csv = exportTransactionsCsv(budgets);
+    assert.ok(csv.startsWith('\uFEFF'));
+    assert.match(csv, /"'=Household"/);
+    assert.match(csv, /"'=SUM\(1,2\), ""quoted""\nand continued"/);
+
+    assert.deepEqual(parseTransactionsCsv(csv), [{
+      category: '=Household',
+      description: '=SUM(1,2), "quoted"\nand continued',
+      amount: -42.75,
+      date: '2025-04-12T12:30:00.000Z',
+    }]);
+  });
+
+  it('rejects malformed CSV headers, quoting, columns, amounts, and dates', () => {
+    const invalidCsv = [
+      ['missing required headers', 'Name,Description,Amount,Date\nFood,Lunch,12,2025-01-01'],
+      ['header without a transaction', 'Category,Description,Amount,Date\n'],
+      ['unclosed quoted field', 'Category,Description,Amount,Date\nFood,"Lunch,12,2025-01-01'],
+      ['unexpected quote', 'Category,Description,Amount,Date\nFood,Lun"ch,12,2025-01-01'],
+      ['wrong number of columns', 'Category,Description,Amount,Date\nFood,Lunch,12'],
+      ['invalid amount', 'Category,Description,Amount,Date\nFood,Lunch,nope,2025-01-01'],
+      ['invalid date', 'Category,Description,Amount,Date\nFood,Lunch,12,2025-02-30'],
+    ];
+
+    for (const [label, csv] of invalidCsv) {
+      assert.throws(() => parseTransactionsCsv(csv), undefined, label);
+    }
+  });
+
+  it('appends to matching categories and creates missing categories', () => {
+    const source = {
+      budgets: [{
+        id: 'food-id',
+        name: 'Food',
+        limit: 500,
+        income: 25,
+        transactions: [{
+          id: 'existing',
+          description: 'Earlier purchase',
+          amount: 10,
+          date: '2025-01-01T12:00:00.000Z',
+        }],
+      }],
+      globalIncome: 3000,
+    };
+    const ids = ['added-existing', 'new-budget', 'added-new'];
+    const result = appendCsvTransactions(source, [
+      { category: 'fOoD', description: 'Groceries', amount: -30, date: '2025-02-01T12:00:00.000Z' },
+      { category: 'Travel', description: 'Train', amount: 45, date: '2025-02-02T12:00:00.000Z' },
+    ], () => ids.shift());
+
+    assert.equal(result.budgets.length, 2);
+    assert.equal(result.budgets[0].name, 'Food');
+    assert.equal(result.budgets[0].limit, 500);
+    assert.deepEqual(result.budgets[0].transactions.map(({ id, amount }) => ({ id, amount })), [
+      { id: 'existing', amount: 10 },
+      { id: 'added-existing', amount: -30 },
+    ]);
+    assert.deepEqual(result.budgets[1], {
+      id: 'new-budget',
+      name: 'Travel',
+      limit: 0,
+      income: 0,
+      transactions: [{
+        id: 'added-new',
+        description: 'Train',
+        amount: 45,
+        date: '2025-02-02T12:00:00.000Z',
+      }],
+    });
+    assert.equal(result.globalIncome, 3000);
+  });
+});
+
+describe('versioned app-data backups', () => {
+  it('round-trips app data in the supported backup format and version', () => {
+    const data = {
+      budgets: [{
+        id: 'budget-1',
+        name: 'Home',
+        limit: 1200,
+        income: 4000,
+        transactions: [{
+          id: 'transaction-1',
+          description: 'Rent',
+          amount: -950,
+          date: '2025-01-01T12:00:00.000Z',
+        }],
+      }],
+      globalIncome: 4000,
+      savingsPercentage: 15,
+      savingsGoals: [{ id: 'goal-1', name: 'Emergency fund', target: 5000, saved: 500 }],
+      timeZone: 'America/St_Johns',
+      budgetAlertThreshold: 75,
+      recurringTransactions: [{
+        id: 'recurring-1',
+        budgetId: 'budget-1',
+        description: 'Utilities',
+        amount: 100,
+        frequency: 'monthly',
+        nextDueDate: '2025-02-15',
+        dayOfMonth: 15,
+      }],
+    };
+    const backup = JSON.parse(createAppDataBackup(data, '2025-03-01T00:00:00.000Z'));
+
+    assert.equal(backup.format, 'home-budgeting-backup');
+    assert.equal(backup.version, 1);
+    assert.equal(backup.exportedAt, '2025-03-01T00:00:00.000Z');
+    assert.deepEqual(parseAppDataBackup(JSON.stringify(backup)), data);
+  });
+
+  it('rejects unsupported format/version and invalid backup schemas', () => {
+    const valid = {
+      format: 'home-budgeting-backup',
+      version: 1,
+      exportedAt: '2025-03-01T00:00:00.000Z',
+      data: { budgets: [] },
+    };
+    for (const backup of [
+      { ...valid, format: 'other-format' },
+      { ...valid, version: 2 },
+      { ...valid, data: { budgets: [{ id: 'budget', name: 'Home', limit: 10, transactions: 'not-an-array' }] } },
+      { ...valid, exportedAt: 'not-a-date' },
+    ]) {
+      assert.throws(() => parseAppDataBackup(JSON.stringify(backup)));
+    }
+    assert.throws(() => parseAppDataBackup('{not json}'), { message: 'Backup file is not valid JSON' });
+    assert.throws(() => createAppDataBackup({ budgets: [{ id: 'bad', name: 'Home', limit: Infinity, transactions: [] }] }));
   });
 });
 
@@ -1123,5 +1276,83 @@ describe('Store', () => {
       store.deleteTransaction('missing-budget', 'missing-transaction'),
       { message: 'Budget not found' }
     );
+  });
+
+  it('imports CSV rows by appending to existing categories and persists new categories', async () => {
+    const store = new Store();
+    const existing = await store.createBudget('Food', 600, 100);
+    const existingTransaction = await store.addTransaction(
+      existing.id,
+      'Existing purchase',
+      20,
+      '2025-01-01T12:00:00.000Z'
+    );
+    const imported = await store.importTransactions([
+      { category: 'food', description: 'Market, produce', amount: -32.5, date: '2025-02-01T12:00:00.000Z' },
+      { category: 'Travel', description: 'Bus fare', amount: 8, date: '2025-02-02T12:00:00.000Z' },
+    ]);
+
+    assert.equal(imported, 2);
+    const reloaded = new Store();
+    const data = await reloaded.getAppData();
+    assert.equal(data.budgets.length, 2);
+    assert.equal(data.budgets[0].id, existing.id);
+    assert.equal(data.budgets[0].limit, 600);
+    assert.deepEqual(data.budgets[0].transactions.map(({ id, description, amount }) => ({
+      id, description, amount,
+    })), [
+      { id: existingTransaction.id, description: 'Existing purchase', amount: 20 },
+      { id: data.budgets[0].transactions[1].id, description: 'Market, produce', amount: -32.5 },
+    ]);
+    assert.equal(data.budgets[1].name, 'Travel');
+    assert.equal(data.budgets[1].limit, 0);
+    assert.equal(data.budgets[1].transactions[0].description, 'Bus fare');
+    assert.equal(data.budgets[1].transactions[0].amount, 8);
+    assert.deepEqual(JSON.parse(await fs.readFile(store.filePath, 'utf8')), data);
+  });
+
+  it('restores a versioned backup and persists the complete restored app data', async () => {
+    const store = new Store();
+    await store.createBudget('Temporary', 25);
+    const backupData = {
+      budgets: [{
+        id: 'restored-budget',
+        name: 'Restored',
+        limit: 900,
+        income: 1200,
+        transactions: [{
+          id: 'restored-transaction',
+          description: 'Restored expense',
+          amount: -75,
+          date: '2025-03-04T12:00:00.000Z',
+        }],
+      }],
+      globalIncome: 1200,
+      savingsPercentage: 10,
+      savingsGoals: [{ id: 'restored-goal', name: 'Reserve', target: 500, saved: 100 }],
+      timeZone: 'America/St_Johns',
+      budgetAlertThreshold: 70,
+    };
+    const restored = parseAppDataBackup(createAppDataBackup(backupData, '2025-03-05T00:00:00.000Z'));
+    await store.replaceAppData(restored);
+
+    assert.deepEqual(await new Store().getAppData(), backupData);
+    assert.deepEqual(JSON.parse(await fs.readFile(store.filePath, 'utf8')), backupData);
+  });
+
+  it('leaves in-memory and persisted data unchanged when backup restore validation fails', async () => {
+    const store = new Store();
+    const budget = await store.createBudget('Keep me', 250);
+    await store.addTransaction(budget.id, 'Saved expense', 30, '2025-04-01T12:00:00.000Z');
+    const persistedBefore = await fs.readFile(store.filePath, 'utf8');
+    const memoryBefore = await store.getAppData();
+    const invalidBackupData = {
+      budgets: [{ id: 'invalid', name: 'Broken', limit: 100, transactions: 'invalid' }],
+    };
+
+    await assert.rejects(store.replaceAppData(invalidBackupData));
+    assert.deepEqual(await store.getAppData(), memoryBefore);
+    assert.equal(await fs.readFile(store.filePath, 'utf8'), persistedBefore);
+    assert.deepEqual(await new Store().getAppData(), memoryBefore);
   });
 });

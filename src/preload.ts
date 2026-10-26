@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AppData } from './types';
+import type { CsvTransactionRow } from './dataTransfer';
 
 contextBridge.exposeInMainWorld('api', {
+  getAppData: () => ipcRenderer.invoke('getAppData'),
+  replaceAppData: (data: AppData) => ipcRenderer.invoke('replaceAppData', data),
+  importTransactions: (rows: CsvTransactionRow[]) => ipcRenderer.invoke('importTransactions', rows),
   getBudgets: () => ipcRenderer.invoke('getBudgets'),
   createBudget: (name: string, limit: number, income: number) => ipcRenderer.invoke('createBudget', name, limit, income),
   deleteBudget: (id: string) => ipcRenderer.invoke('deleteBudget', id),

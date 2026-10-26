@@ -8,6 +8,14 @@ import { getSpendingSummary } from '../spending';
 import { filterTransactions } from '../transactions';
 import { getZonedDateKey, getZonedMonthKey, zonedNoonToIso } from '../timezone';
 import { getDaysUntilDate, getNextOccurrenceDate, isValidDateKey, RecurrenceFrequency, RecurringTransactionSchedule } from '../recurring';
+import {
+  appendCsvTransactions,
+  createAppDataBackup,
+  exportTransactionsCsv,
+  parseAppDataBackup,
+  parseTransactionsCsv,
+} from '../dataTransfer';
+import type { AppData } from '../types';
 
 type Budget = { id: string; name: string; limit: number; income?: number; transactions?: Transaction[] };
 type Transaction = { id: string; description: string; amount: number; date: string };
@@ -22,6 +30,15 @@ const SAVINGS_GOALS_KEY = 'home-budgeting-savings-goals';
 const TIME_ZONE_KEY = 'home-budgeting-time-zone';
 const BUDGET_ALERT_THRESHOLD_KEY = 'home-budgeting-alert-threshold';
 const RECURRING_SCHEDULES_KEY = 'home-budgeting-recurring-schedules';
+const BROWSER_APP_DATA_KEYS = [
+  BUDGETS_KEY,
+  GLOBAL_INCOME_KEY,
+  SAVINGS_PERCENTAGE_KEY,
+  SAVINGS_GOALS_KEY,
+  TIME_ZONE_KEY,
+  BUDGET_ALERT_THRESHOLD_KEY,
+  RECURRING_SCHEDULES_KEY,
+];
 
 function getTimeZoneOptions(): string[] {
   const supported = (Intl as any).supportedValuesOf;
@@ -72,6 +89,61 @@ function writeBrowserRecurringSchedules(schedules: RecurringSchedule[]) {
   localStorage.setItem(RECURRING_SCHEDULES_KEY, JSON.stringify(schedules));
 }
 
+function readBrowserAppData(): AppData {
+  return {
+    budgets: readBrowserBudgets().map((budget) => ({
+      ...budget,
+      transactions: budget.transactions || [],
+    })),
+    globalIncome: Number(localStorage.getItem(GLOBAL_INCOME_KEY)) || 0,
+    savingsPercentage: Number(localStorage.getItem(SAVINGS_PERCENTAGE_KEY)) || 0,
+    savingsGoals: readBrowserSavingsGoals(),
+    timeZone: localStorage.getItem(TIME_ZONE_KEY) || '',
+    budgetAlertThreshold: Number(localStorage.getItem(BUDGET_ALERT_THRESHOLD_KEY) ?? '80'),
+    recurringTransactions: readBrowserRecurringSchedules(),
+  };
+}
+
+function writeBrowserAppData(data: AppData) {
+  const values = [
+    JSON.stringify(data.budgets),
+    String(data.globalIncome ?? 0),
+    String(data.savingsPercentage ?? 0),
+    JSON.stringify(data.savingsGoals || []),
+    data.timeZone || '',
+    String(data.budgetAlertThreshold ?? 80),
+    JSON.stringify(data.recurringTransactions || []),
+  ];
+  const previousValues = BROWSER_APP_DATA_KEYS.map((key) => localStorage.getItem(key));
+  try {
+    BROWSER_APP_DATA_KEYS.forEach((key, index) => localStorage.setItem(key, values[index]));
+  } catch (error) {
+    let rollbackFailed = false;
+    BROWSER_APP_DATA_KEYS.forEach((key, index) => {
+      try {
+        const previousValue = previousValues[index];
+        if (previousValue === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previousValue);
+      } catch {
+        rollbackFailed = true;
+      }
+    });
+    if (rollbackFailed) throw new Error('Restore failed and browser data rollback could not complete');
+    throw error;
+  }
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function updateBrowserBudget(id: string, update: (budget: Budget) => void) {
   const budgets = readBrowserBudgets();
   const budget = budgets.find((item) => item.id === id);
@@ -82,6 +154,10 @@ function updateBrowserBudget(id: string, update: (budget: Budget) => void) {
 
 function makeBrowserId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function getDefaultTransactionDate(month: string, timeZone: string) {
@@ -176,6 +252,10 @@ export default function App() {
   const [savingsAdjustment, setSavingsAdjustment] = useState<number | ''>('');
   const [deletingSavingsGoal, setDeletingSavingsGoal] = useState<SavingsGoal | null>(null);
   const [page, setPage] = useState<'home' | 'transactions' | 'recurring' | 'savings' | 'settings'>('home');
+  const [pendingBackup, setPendingBackup] = useState<AppData | null>(null);
+  const [pendingBackupFilename, setPendingBackupFilename] = useState('');
+  const csvImportInputRef = useRef<HTMLInputElement | null>(null);
+  const backupImportInputRef = useRef<HTMLInputElement | null>(null);
   const [recurringBudgetId, setRecurringBudgetId] = useState('');
   const [recurringDescription, setRecurringDescription] = useState('');
   const [recurringAmount, setRecurringAmount] = useState<number | ''>('');
@@ -290,8 +370,93 @@ export default function App() {
       setTimeZoneDraft(storedTimeZone);
       setSelectedMonth(getZonedMonthKey(new Date(), storedTimeZone) || getMonthInputValue());
       setSavedDataLoaded(true);
+      return true;
     } catch {
       showToast('Failed to load saved data', 'error');
+      return false;
+    }
+  }
+
+  async function exportCsv() {
+    try {
+      const api = (window as any).api;
+      const data: AppData = api?.getAppData ? await api.getAppData() : readBrowserAppData();
+      const date = new Date().toISOString().slice(0, 10);
+      downloadTextFile(`home-budgeting-transactions-${date}.csv`, exportTransactionsCsv(data.budgets), 'text/csv;charset=utf-8');
+      showToast('Transactions exported as CSV', 'success');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Failed to export transactions'), 'error');
+    }
+  }
+
+  async function exportBackup() {
+    try {
+      const api = (window as any).api;
+      const data: AppData = api?.getAppData ? await api.getAppData() : readBrowserAppData();
+      const date = new Date().toISOString().slice(0, 10);
+      downloadTextFile(
+        `home-budgeting-backup-${date}.json`,
+        createAppDataBackup(data),
+        'application/json;charset=utf-8'
+      );
+      showToast('Backup created', 'success');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Failed to create backup'), 'error');
+    }
+  }
+
+  async function importCsvFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const rows = parseTransactionsCsv(await file.text(), timeZone);
+      const api = (window as any).api;
+      if (api?.importTransactions) {
+        await api.importTransactions(rows);
+      } else {
+        const importedData = appendCsvTransactions(readBrowserAppData(), rows, makeBrowserId);
+        writeBrowserAppData(importedData);
+      }
+      const refreshed = await refresh();
+      if (refreshed) {
+        showToast(`${rows.length} transaction${rows.length === 1 ? '' : 's'} imported`, 'success');
+      }
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Failed to import CSV file'), 'error');
+    } finally {
+      input.value = '';
+    }
+  }
+
+  async function selectBackupFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      setPendingBackup(parseAppDataBackup(await file.text()));
+      setPendingBackupFilename(file.name);
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Backup file is invalid'), 'error');
+    } finally {
+      input.value = '';
+    }
+  }
+
+  async function restoreBackup() {
+    if (!pendingBackup) return;
+    try {
+      const api = (window as any).api;
+      if (api?.replaceAppData) await api.replaceAppData(pendingBackup);
+      else writeBrowserAppData(pendingBackup);
+      alertStatusesRef.current = null;
+      alertContextRef.current = null;
+      recurringReminderKeysRef.current.clear();
+      setPendingBackup(null);
+      setPendingBackupFilename('');
+      if (await refresh()) showToast('Backup restored', 'success');
+    } catch (error) {
+      showToast(getErrorMessage(error, 'Failed to restore backup'), 'error');
     }
   }
 
@@ -1434,7 +1599,69 @@ export default function App() {
               This percentage is calculated from your positive remaining global balance after category transactions.
               It is reserved from the available balance but is not automatically added to a savings goal.
             </p>
+            <div className="settings-card data-transfer-card">
+              <div>
+                <h3>CSV transactions</h3>
+                <p className="muted small">
+                  Export transaction rows or append a CSV with Category, Description, Amount, and Date columns.
+                  Missing categories are created with a zero budget limit.
+                </p>
+              </div>
+              <div className="actions">
+                <button onClick={exportCsv}>Export Transactions CSV</button>
+                <button className="btn muted" onClick={() => csvImportInputRef.current?.click()}>
+                  Import Transactions CSV
+                </button>
+                <input
+                  ref={csvImportInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept=".csv,text/csv"
+                  aria-label="Choose transaction CSV file"
+                  onChange={importCsvFile}
+                />
+              </div>
+            </div>
+            <div className="settings-card data-transfer-card">
+              <div>
+                <h3>Full backup</h3>
+                <p className="muted small">
+                  Save or restore budgets, transactions, recurring schedules, savings goals, and app settings.
+                  Restoring replaces all current app data.
+                </p>
+              </div>
+              <div className="actions">
+                <button onClick={exportBackup}>Create Backup</button>
+                <button className="btn muted" onClick={() => backupImportInputRef.current?.click()}>
+                  Restore Backup
+                </button>
+                <input
+                  ref={backupImportInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept=".json,application/json"
+                  aria-label="Choose backup JSON file"
+                  onChange={selectBackupFile}
+                />
+              </div>
+            </div>
           </section>
+        )}
+        {pendingBackup && (
+          <Modal
+            title="Replace current data?"
+            onClose={() => {
+              setPendingBackup(null);
+              setPendingBackupFilename('');
+            }}
+            onConfirm={restoreBackup}
+            confirmLabel="Restore Backup"
+          >
+            <p>
+              Restore <strong>{pendingBackupFilename}</strong>? This will replace all current budgets,
+              transactions, schedules, goals, and app settings.
+            </p>
+          </Modal>
         )}
         {deleting && (
           <Modal

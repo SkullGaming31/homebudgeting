@@ -16,5 +16,6 @@
 6. **Savings goals** (implemented)
    - Create goals with target amounts and track progress with manual contributions or withdrawals.
    - Reserve a configurable percentage of the positive remaining global balance without automatically crediting a goal.
-7. **CSV import/export and backups**
-   - Support moving data in and out of the app and restoring backups.
+7. **CSV import/export and backups** (implemented)
+   - Export transactions to CSV and append CSV rows, creating missing categories with a zero budget limit.
+   - Create and restore validated full-data JSON backups.

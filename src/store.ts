@@ -4,6 +4,7 @@ import { app } from 'electron';
 import { AppData, Budget, RecurringTransaction, SavingsGoal, Transaction } from './types';
 import { getNextOccurrenceDate, isValidDateKey } from './recurring';
 import { isValidTimeZone } from './timezone';
+import { appendCsvTransactions, CsvTransactionRow, validateAppData } from './dataTransfer';
 
 function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
@@ -32,6 +33,35 @@ export class Store {
   async save() {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+  }
+
+  async getAppData() {
+    await this.load();
+    return validateAppData(this.data);
+  }
+
+  async replaceAppData(data: unknown) {
+    const validatedData = validateAppData(data);
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+    const temporaryPath = `${this.filePath}.${makeId()}.tmp`;
+    try {
+      await fs.writeFile(temporaryPath, JSON.stringify(validatedData, null, 2), 'utf8');
+      await fs.rename(temporaryPath, this.filePath);
+    } catch (error) {
+      await fs.unlink(temporaryPath).catch((cleanupError: NodeJS.ErrnoException) => {
+        if (cleanupError.code !== 'ENOENT') throw cleanupError;
+      });
+      throw error;
+    }
+    this.data = validatedData;
+    return validateAppData(this.data);
+  }
+
+  async importTransactions(rows: CsvTransactionRow[]) {
+    await this.load();
+    const importedData = appendCsvTransactions(this.data, rows, makeId);
+    await this.replaceAppData(importedData);
+    return rows.length;
   }
 
   async getGlobalIncome() {
