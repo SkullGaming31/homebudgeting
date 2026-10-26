@@ -24,7 +24,7 @@ Build a Windows x64 installer:
 npm run dist:win
 ```
 
-The NSIS setup executable is written to `release/` as `Home-Budgeting-Setup-<version>.exe`. It supports choosing an installation folder and creates Start Menu and desktop shortcuts. The installer is unsigned, so Windows SmartScreen may show a warning until the app is signed.
+The NSIS setup executable is written to `release/` as `Home-Budgeting-Setup-<version>.exe`. It supports choosing an installation folder, grants the Windows sandbox read access to that folder, and creates Start Menu and desktop shortcuts. The installer is unsigned, so Windows SmartScreen may show a warning until the app is signed.
 
 Development (renderer + main process in separate terminals):
 

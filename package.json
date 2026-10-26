@@ -1,6 +1,6 @@
 {
   "name": "home-budgeting",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Home Budgeting Electron app (TypeScript)",
   "main": "dist/main.js",
   "scripts": {
@@ -50,6 +50,7 @@
       ]
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
